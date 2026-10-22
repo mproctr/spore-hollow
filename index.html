@@ -243,11 +243,33 @@ const BROWN=[64,48,38];
 function R(x,y,w,h,c,a){ctx.fillStyle=rgb(c,a);ctx.fillRect(Math.round(x),Math.round(y),w,h);}
 function glow(x,y,r,c,a){if(a<=0.01||r<=0)return;const g=ctx.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,rgb(c,a));g.addColorStop(1,rgb(c,0));ctx.fillStyle=g;ctx.fillRect(x-r,y-r,r*2,r*2);}
 
-function lightLevel(){
-  const d=new Date();const h=d.getHours()+d.getMinutes()/60;
-  const raw=(1+Math.cos(2*Math.PI*(h-13)/24))/2;
-  return clamp((raw-0.25)/0.6,0,1);
+/* ---------- the real sky over Vernon, BC ---------- */
+const SITE={lat:50.267,lon:-119.272};
+function sunAltitude(ms){
+  const rad=Math.PI/180,d=(ms-946728000000)/86400000; // days since J2000
+  const g=(357.529+0.98560028*d)*rad,q=280.459+0.98564736*d;
+  const lng=(q+1.915*Math.sin(g)+0.020*Math.sin(2*g))*rad,e=(23.439-0.00000036*d)*rad;
+  const ra=Math.atan2(Math.cos(e)*Math.sin(lng),Math.cos(lng)),dec=Math.asin(Math.sin(e)*Math.sin(lng));
+  const gmst=((18.697374558+24.06570982441908*d)%24+24)%24;
+  const ha=(gmst*15+SITE.lon)*rad-ra,lat=SITE.lat*rad;
+  return Math.asin(Math.sin(lat)*Math.sin(dec)+Math.cos(lat)*Math.cos(dec)*Math.cos(ha))/rad;
 }
+const SHOWERS=[
+  {name:'Quadrantids',m:0,d:3,w:0.6,k:0.8},{name:'Lyrids',m:3,d:22,w:1.2,k:0.4},
+  {name:'Eta Aquariids',m:4,d:6,w:3,k:0.45},{name:'Perseids',m:7,d:12,w:3,k:1},
+  {name:'Orionids',m:9,d:21,w:3,k:0.6},{name:'Leonids',m:10,d:17,w:1.5,k:0.4},
+  {name:'Geminids',m:11,d:14,w:2,k:1}
+];
+function activeShower(now){
+  const y=new Date(now).getFullYear();let best=null,bi=0;
+  for(const s of SHOWERS)for(const yr of [y-1,y,y+1]){const days=(now-new Date(yr,s.m,s.d,4).getTime())/864e5;const i=s.k*Math.exp(-(days*days)/(2*s.w*s.w));if(i>bi){bi=i;best=s;}}
+  return bi>0.08?{name:best.name,i:bi,dir:hash(best.name.length*7.7)<0.5?-1:1,ang:0.45+hash(best.name.length*3.1)*0.25}:null;
+}
+let skyCache={t:0};
+function sky(){const now=Date.now();if(now-skyCache.t>5000){const alt=sunAltitude(now);skyCache={t:now,alt,rising:sunAltitude(now+6e5)>alt,sh:activeShower(now)};}return skyCache;}
+function smooth(a,b,x){const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);}
+function lightLevel(){return smooth(-9,12,sky().alt);}
+function warmth(){return clamp(1-Math.abs(sky().alt-1)/7,0,1);}
 
 /* ---------- persistence ---------- */
 const KEY='spore-hollow-v1';
@@ -272,7 +294,8 @@ const JOURNAL=[
   {id:'owl',kind:'sight',name:'The owl',sub:'High in the canopy',hint:'Look up, after dark.',note:'Only its eyes, only at night. It has watched every one of your visits.'},
   {id:'folk',kind:'sight',name:'Shadow folk',sub:'At the edges of the clearing',hint:'Something in the shadows is watching.',note:'Small, dark, glowing eyes. They come for the music and stay for the moss. Shy, but they always come back.'},
   {id:'dancers',kind:'sight',name:'The dancers',sub:'Past the cedars',hint:'Follow the music.',note:'Five of them. Always five. They have never turned around.'},
-  {id:'fireflies',kind:'sight',name:'Fireflies',sub:'Everywhere, sort of',hint:'Reach up toward the dark.',note:'They gather when you reach toward them and wander off the moment you stop.'}
+  {id:'fireflies',kind:'sight',name:'Fireflies',sub:'Everywhere, sort of',hint:'Reach up toward the dark.',note:'They gather when you reach toward them and wander off the moment you stop.'},
+  {id:'meteor',kind:'sight',name:'Shooting star',sub:'Over the clearing, after dark',hint:'Watch the sky on a dark night. Tap one to make a wish.',note:'Comet dust smaller than a grain of sand, burning up 100 km overhead. They fall thickest during meteor showers: the Perseids in August, the Orionids in October (left behind by Halley\'s Comet), and the Geminids in December.'}
 ];
 const JBY={};for(const j of JOURNAL)JBY[j.id]=j;
 function note(id){
@@ -342,14 +365,22 @@ function critPos(c){
 }
 
 /* ---------- layout ---------- */
-let bgKey=-1;
+let bgKey=-1,skyMask=new Uint8Array(1),showerAnnounced=false;
+const meteors=[];
+const WISHES=['You make a wish. The grove keeps it to itself.','Wish made. The moss seems to approve.','You make a wish. Something past the cedars cheers.'];
+function spawnMeteor(sh){
+  const dir=sh?sh.dir:(Math.random()<0.5?-1:1),a=sh?sh.ang+(Math.random()-0.5)*0.08:0.3+Math.random()*0.5,sp=110+Math.random()*70;
+  meteors.push({x:W*(0.15+Math.random()*0.7),y:H*0.15+Math.random()*(G.gy*0.75-H*0.15),vx:Math.cos(a)*sp*dir,vy:Math.sin(a)*sp,len:10+Math.floor(Math.random()*9),life:0.45+Math.random()*0.4,age:0,wished:false});
+  if(entered)note('meteor');
+}
+function segDist(px,py,ax,ay,bx,by){const dx=bx-ax,dy=by-ay,l=dx*dx+dy*dy||1,t=clamp(((px-ax)*dx+(py-ay)*dy)/l,0,1);return Math.hypot(px-ax-dx*t,py-ay-dy*t);}
 const fireflies=[];
 function layout(){
   const iw=innerWidth,ih=innerHeight;
   S=Math.max(2,Math.round(Math.min(iw,ih*0.56)/190));
   W=Math.ceil(iw/S);H=Math.ceil(ih/S);
   cv.width=W;cv.height=H;cv.style.width=W*S+'px';cv.style.height=H*S+'px';
-  bg.width=W;bg.height=H;
+  bg.width=W;bg.height=H;skyMask=new Uint8Array(W*H);meteors.length=0;
   ctx.imageSmoothingEnabled=false;
   const gy=Math.round(H*0.5),gh=H-gy;
   G={gy,gh,
@@ -365,20 +396,21 @@ function layout(){
 }
 
 /* ---------- static background (same grove every time) ---------- */
-function buildBG(L){
+function buildBG(L,warm){
   const t=L*0.7;
   const N={skyT:[8,12,34],skyB:[26,32,72],far:[20,24,48],mid:[11,13,22],mossF:[16,30,34],mossN:[28,58,40],mossH:[56,94,58],dark:[5,7,10],can:[9,22,21],canH:[20,42,33],bark:[50,37,30],barkD:[28,21,18],wood:[120,92,66],ring:[84,62,44],pond:[9,18,40],pondH:[80,100,150],strand:[30,52,40],pad:[24,52,34]};
   const D={skyT:[64,112,118],skyB:[150,186,150],far:[54,76,72],mid:[28,38,38],mossF:[40,72,52],mossN:[62,112,62],mossH:[112,162,84],dark:[12,18,18],can:[22,54,38],canH:[58,98,58],bark:[92,68,50],barkD:[52,38,30],wood:[176,140,100],ring:[130,98,70],pond:[30,64,74],pondH:[160,200,196],strand:[60,96,64],pad:[50,96,56]};
   const C={};for(const k in N)C[k]=mix(N[k],D[k],t);
   const img=bctx.createImageData(W,H),d=img.data;
-  const P=(x,y,c)=>{x=Math.round(x);y=Math.round(y);if(x<0||y<0||x>=W||y>=H)return;const i=(y*W+x)*4;d[i]=c[0];d[i+1]=c[1];d[i+2]=c[2];d[i+3]=255;};
+  const P=(x,y,c)=>{x=Math.round(x);y=Math.round(y);if(x<0||y<0||x>=W||y>=H)return;const i=(y*W+x)*4;d[i]=c[0];d[i+1]=c[1];d[i+2]=c[2];d[i+3]=255;skyMask[y*W+x]=0;};
   const B=(x,y,c,a)=>{x=Math.round(x);y=Math.round(y);if(x<0||y<0||x>=W||y>=H)return;const i=(y*W+x)*4;d[i]+= (c[0]-d[i])*a;d[i+1]+=(c[1]-d[i+1])*a;d[i+2]+=(c[2]-d[i+2])*a;};
   const Rb=(x,y,w,h,c)=>{for(let j=0;j<h;j++)for(let i=0;i<w;i++)P(x+i,y+j,c);};
   const E=(cx,cy,rx,ry,c)=>{for(let y=-ry;y<=ry;y++)for(let x=-rx;x<=rx;x++){if((x*x)/(rx*rx+0.01)+(y*y)/(ry*ry+0.01)<=1)P(cx+x,cy+y,c);}};
   const dith=(a,b,f,x,y)=>f*16>BAYER[y&3][x&3]+0.5?b:a;
   const {gy,gh}=G;
   // sky
-  for(let y=0;y<gy;y++){const q=(y/gy)*4,lo=Math.floor(q),fr=q-lo;const c0=mix(C.skyT,C.skyB,lo/4),c1=mix(C.skyT,C.skyB,Math.min(1,(lo+1)/4));for(let x=0;x<W;x++)P(x,y,dith(c0,c1,fr,x,y));}
+  const SUN=[236,138,92];
+  for(let y=0;y<gy;y++){const q=(y/gy)*4,lo=Math.floor(q),fr=q-lo,hz=y/gy,wf=warm*0.62*hz*hz;const c0=mix(mix(C.skyT,C.skyB,lo/4),SUN,wf),c1=mix(mix(C.skyT,C.skyB,Math.min(1,(lo+1)/4)),SUN,wf);for(let x=0;x<W;x++){P(x,y,dith(c0,c1,fr,x,y));skyMask[y*W+x]=1;}}
   // stars + moon
   const rs=mulberry(101);
   for(let i=0;i<60;i++){const x=rs()*W,y=rs()*gy*0.6,b=rs();if(L<0.5)B(x,y,[235,235,255],(0.35+b*0.6)*(1-L*2));}
@@ -388,7 +420,7 @@ function buildBG(L){
   const rf=mulberry(202);
   for(let i=0;i<16;i++){const x=Math.round(rf()*W),w=2+Math.floor(rf()*3),c=mix(C.far,C.skyB,0.22+rf()*0.25);Rb(x,0,w,gy+3,c);}
   // horizon mist
-  for(let y=gy-14;y<gy+4;y++){const f=1-Math.abs(y-(gy-4))/12;if(f<=0)continue;for(let x=0;x<W;x++)if(f*16>BAYER[y&3][x&3])B(x,y,C.skyB,0.3*f);}
+  for(let y=gy-14;y<gy+4;y++){const f=1-Math.abs(y-(gy-4))/12;if(f<=0)continue;for(let x=0;x<W;x++)if(f*16>BAYER[y&3][x&3])B(x,y,mix(C.skyB,SUN,warm*0.6),0.3*f);}
   // ground
   const rg=mulberry(303);
   for(let y=gy;y<H;y++){const tt=(y-gy)/gh,base=mix(C.mossF,C.mossN,Math.pow(tt,0.8));for(let x=0;x<W;x++){const n=rg();P(x,y,n<0.05?mix(base,C.mossH,0.6):n<0.11?mix(base,C.dark,0.35):base);}}
@@ -576,10 +608,19 @@ function awayLine(sinceMs){const gone=Date.now()-sinceMs,n=fruitedBetween(sinceM
 let lastList=[],lastFrame=performance.now(),lastLvl=0.5,swellCool=0;
 function frame(now){
   const tS=now/1000,dt=Math.min(0.05,(now-lastFrame)/1000);lastFrame=now;
-  const L=lightLevel(),key=Math.round(L*20);
-  if(key!==bgKey){buildBG(L);bgKey=key;}
+  const L=lightLevel(),warm=warmth(),key=Math.round(L*20)*20+Math.round(warm*10);
+  if(key!==bgKey){buildBG(L,warm);bgKey=key;}
   ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
   ctx.drawImage(bg,0,0);
+
+  // shooting stars, only where real sky shows through the trees
+  const sk=sky();
+  if(L<0.12&&!document.hidden){const rate=1/300+(sk.sh?sk.sh.i/25:0);if(Math.random()<dt*rate&&meteors.length<3)spawnMeteor(sk.sh);}
+  if(meteors.length){ctx.globalCompositeOperation='lighter';
+    for(let i=meteors.length-1;i>=0;i--){const m=meteors[i];m.age+=dt;if(m.age>m.life+0.6){meteors.splice(i,1);continue;}if(m.age>m.life)continue;
+      const hx=m.x+m.vx*m.age,hy=m.y+m.vy*m.age,fade=Math.sin(Math.PI*m.age/m.life),sp=Math.hypot(m.vx,m.vy),ux=m.vx/sp,uy=m.vy/sp;
+      for(let k=0;k<m.len;k++){const px=Math.round(hx-ux*k),py=Math.round(hy-uy*k);if(px<0||py<0||px>=W||py>=H||!skyMask[py*W+px])continue;R(px,py,1,1,k<2?[255,255,236]:[190,212,255],fade*(1-k/m.len)*(k<2?1:0.7));}}
+    ctx.globalCompositeOperation='source-over';}
   const bt=beatTime(),e=reduce?0.5:kickEnv(bt),lvl=beatLevel(L),leaning=Date.now()<leanUntil;
   const pc=PARTY[Math.floor(bt/(BEAT*8))%4|0]||PARTY[0],pc2=PARTY[(Math.floor(bt/(BEAT*8))+2)%4|0]||PARTY[2];
   let I=lvl*(0.5+0.5*e)*(leaning?1.5:1);
@@ -669,12 +710,13 @@ function frame(now){
   if(lvl>0.82&&lastLvl<=0.82&&tS>swellCool&&entered){say('The music past the cedars swells.');swellCool=tS+180;}
   if(lvl<0.14&&lastLvl>=0.14&&tS>swellCool&&entered){say('The beat beyond the trees fades to a heartbeat.');swellCool=tS+180;}
   lastLvl=lvl;
+  if(entered&&!showerAnnounced&&L<0.12){showerAnnounced=true;if(sk.sh&&sk.sh.i>0.25){const nm=sk.sh.name;setTimeout(()=>say(`The ${nm} are falling tonight. Keep an eye on the sky.`,8000),10000);}}
 
   requestAnimationFrame(frame);
 }
 
 /* ---------- status ---------- */
-function updateStatus(){const L=lightLevel(),n=lastList.filter(m=>m.stage==='mature').length;statusEl.textContent=`${L<0.3?'Night':L<0.7?'Twilight':'Day'} · ${n} fruiting`;}
+function updateStatus(){const s=sky(),n=lastList.filter(m=>m.stage==='mature').length;const phase=s.alt>=6?'Day':s.alt>=-6?(s.rising?'Dawn':'Dusk'):'Night';statusEl.textContent=`${phase} · ${n} fruiting`;}
 setInterval(updateStatus,2000);
 
 /* ---------- ambient events ---------- */
@@ -702,6 +744,10 @@ function addPulse(x,y){
 }
 cv.addEventListener('pointerdown',ev=>{
   const r=cv.getBoundingClientRect(),x=(ev.clientX-r.left)/r.width*W,y=(ev.clientY-r.top)/r.height*H,tS=performance.now()/1000,pan=(x/W)*2-1;
+  // shooting stars
+  for(const m of meteors){if(m.wished||m.age>m.life+0.6)continue;const t=Math.min(m.age,m.life);if(segDist(x,y,m.x,m.y,m.x+m.vx*t,m.y+m.vy*t)<9){m.wished=true;
+    const e=state.journal.meteor||(state.journal.meteor={first:Date.now(),looks:1});e.wishes=(e.wishes||0)+1;save();
+    emitSpores(x,y,10,[255,250,220]);[0,2,4].forEach((k,i)=>setTimeout(()=>chime(PENTA[k]+12,pan,0.06),i*120));say(WISHES[Math.floor(Math.random()*WISHES.length)]);return;}}
   // shadow folk
   for(const c of CRIT){if(tS<c.hide||!c._pos)continue;if(Math.hypot(c._pos.x-x,c._pos.y-y)<7){c.hide=tS+20+Math.random()*25;blip(pan);say(c.party?'One of them slips back into the dark.':'Someone ducks back into the shadows.');note('folk');return;}}
   // the owl
@@ -736,6 +782,7 @@ function drawSighting(id){
   if(id==='owl'){for(let y=5;y<15;y++)R(8,y,9,1,[12,22,20]);R(9,9,2,1,[255,190,80]);R(13,9,2,1,[255,190,80]);ctx.globalCompositeOperation='lighter';glow(10,9.5,3,[255,190,80],0.4);glow(14,9.5,3,[255,190,80],0.4);}
   if(id==='folk'){const s=SPR.ears,x0=10,y0=10;s.rows.forEach((row,j)=>{for(let i=0;i<row.length;i++)if(row[i]==='X')R(x0+i,y0+j,1,1,body);});for(const [ex,ey] of s.eyes)R(x0+ex,y0+ey,1,1,[255,211,107]);}
   if(id==='dancers'){ctx.globalCompositeOperation='lighter';glow(12,12,14,[255,95,191],0.5);ctx.globalCompositeOperation='source-over';for(let i=0;i<5;i++){const x=4+i*4,y=17-(i%2);R(x,y-3,1,3,[4,4,8]);R(x,y-4,1,1,[4,4,8]);}}
+  if(id==='meteor'){for(const [x,y] of [[3,15],[20,3],[8,4],[21,16]])R(x,y,1,1,[200,210,240]);ctx.globalCompositeOperation='lighter';for(let k=0;k<13;k++)R(18-k,13-Math.round(k*0.6),1,1,k<2?[255,255,236]:[190,212,255],1-k/13);glow(18,13,3,[255,255,236],0.5);ctx.globalCompositeOperation='source-over';}
   if(id==='fireflies'){ctx.globalCompositeOperation='lighter';for(const [x,y] of [[6,7],[15,5],[11,13],[19,12]]){glow(x,y,4,[210,255,120],0.5);R(x,y,1,1,[240,255,180]);}}
   ctx.globalCompositeOperation='source-over';
 }
@@ -764,7 +811,8 @@ function renderJournal(){
       const txt=document.createElement('div');txt.className='jtext';
       if(e){txt.innerHTML='<h4></h4><p class="jsub"></p><p class="jnote"></p><p class="jmeta"></p>';
         txt.querySelector('h4').textContent=j.name;txt.querySelector('.jsub').textContent=j.sub;txt.querySelector('.jnote').textContent=j.note;
-        txt.querySelector('.jmeta').textContent=`First noted ${fmtDate(e.first)} · looked ${e.looks} time${e.looks===1?'':'s'}`;}
+        const w=e.wishes||0;
+        txt.querySelector('.jmeta').textContent=j.id==='meteor'?`First seen ${fmtDate(e.first)} · ${e.looks} seen · ${w} wish${w===1?'':'es'} made`:`First noted ${fmtDate(e.first)} · looked ${e.looks} time${e.looks===1?'':'s'}`;}
       else{txt.innerHTML='<h4>Not yet noted</h4><p class="jnote"></p>';txt.querySelector('.jnote').textContent=j.hint;}
       row.appendChild(txt);jList.appendChild(row);
     }
@@ -805,7 +853,6 @@ updateStatus();
 requestAnimationFrame(t=>{lastFrame=t;frame(t);});
 })();
 </script>
-
 <script>
 if ('serviceWorker' in navigator) {
   addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
