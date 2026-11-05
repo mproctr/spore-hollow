@@ -56,6 +56,7 @@ body {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   cursor: pointer;
+  touch-action: none;
 }
 .hud {
   position: fixed; left: 0; right: 0;
@@ -79,7 +80,10 @@ body {
   color: var(--dim);
   text-shadow: 0 1px 0 #000;
 }
+.hright { display: grid; justify-items: end; gap: 8px; }
 .hbtns { display: flex; gap: 8px; pointer-events: auto; }
+.vbtn { border-color: rgba(219, 230, 210, 0.2); color: var(--dim); }
+.vbtn[aria-pressed="true"] { color: var(--ink); border-color: rgba(214, 160, 110, 0.5); }
 .hbtn {
   position: relative;
   pointer-events: auto;
@@ -209,9 +213,12 @@ button:focus-visible { outline: 2px solid var(--cap); outline-offset: 3px; }
   <div class="brand"><b>Spore Hollow</b><span id="status">Night</span>
     <button id="held" class="held" type="button" hidden><canvas id="heldc" width="24" height="24"></canvas><span id="heldt"></span></button>
   </div>
-  <div class="hbtns">
-    <button id="jbtn" class="hbtn" type="button">Journal</button>
-    <button id="snd" class="hbtn" type="button" aria-pressed="false">Sound off</button>
+  <div class="hright">
+    <div class="hbtns">
+      <button id="jbtn" class="hbtn" type="button">Journal</button>
+      <button id="snd" class="hbtn" type="button" aria-pressed="false">Sound off</button>
+    </div>
+    <button id="vbtn" class="hbtn vbtn" type="button" aria-pressed="false">Go below</button>
   </div>
 </div>
 
@@ -330,6 +337,9 @@ const JOURNAL=[
   {id:'dancers',kind:'sight',name:'The dancers',sub:'Past the cedars',hint:'Follow the music.',note:'Five of them. Always five. They have never turned around.'},
   {id:'fireflies',kind:'sight',name:'Fireflies',sub:'Everywhere, sort of',hint:'Reach up toward the dark.',note:'They gather when you reach toward them and wander off the moment you stop.'},
   {id:'meteor',kind:'sight',name:'Shooting star',sub:'Over the clearing, after dark',hint:'Watch the sky on a dark night. Tap one to make a wish.',note:'Comet dust smaller than a grain of sand, burning up 100 km overhead. They fall thickest during meteor showers: the Perseids in August, the Orionids in October (left behind by Halley\'s Comet), and the Geminids in December.'},
+  {id:'web',kind:'sight',name:'The wood wide web',sub:'Below the moss',hint:'Swipe up on the clearing to look underneath.',note:'Every mushroom above is only the fruit. The organism is down here: threads finer than hair, wrapped around the cedar roots, trading sugar for water and passing signals through the soil.'},
+  {id:'worm',kind:'sight',name:'Earthworm',sub:'In the topsoil',hint:'Something wriggles below the moss.',note:'Eats its way through dead leaves and leaves the soil better than it found it. Has no opinion about the music.'},
+  {id:'glowstick',kind:'sight',name:'Something buried',sub:'Deep, toward the cedars',hint:'Something glows down there, on the side nearest the music.',note:'A glow stick, still faintly glowing. Glow sticks last a night, maybe two. Nobody knows how long this one has been down here, or who dropped it.'},
   {id:'rain',kind:'sight',name:'Rain in the hollow',sub:'Comes and goes',hint:'Wait for a wet spell.',note:'Rain is when the grove does its real work. Flushes come thicker after a wet spell, and the bear\'s head tooth only arrives after one.'}
 ];
 const JBY={};for(const j of JOURNAL)JBY[j.id]=j;
@@ -337,7 +347,7 @@ function note(id,quiet){
   let e=state.journal[id];const isNew=!e;
   if(!e)e=state.journal[id]={first:Date.now(),looks:0};
   e.looks++;save();
-  if(isNew){if(!quiet)setTimeout(()=>say(`Added to your field journal: ${JBY[id].name}.`),2400);document.getElementById('jbtn').classList.add('new');}
+  if(isNew){const msg=`Added to your field journal: ${JBY[id].name}.`,tryS=()=>performance.now()-lastSayAt<3500?setTimeout(tryS,1500):say(msg);if(!quiet)setTimeout(tryS,2400);document.getElementById('jbtn').classList.add('new');}
   return isNew;
 }
 
@@ -479,11 +489,13 @@ function layout(){
     stump:{x:Math.round(W*0.8),y:Math.round(gy+gh*0.24),w:12,h:9},
     pond:{cx:Math.round(W*0.64),cy:Math.round(gy+gh*0.56),rx:Math.min(30,Math.round(W*0.14)),ry:7},
     party:{x:Math.round(W*0.19),y:gy},
-    moon:{x:Math.round(W*0.68),y:Math.round(H*0.07)}
+    moon:{x:Math.round(W*0.68),y:Math.round(H*0.07)},
+    surf:Math.round(H*0.3)
   };
   if(!fireflies.length){for(let i=0;i<16;i++)fireflies.push({x:W*(0.1+Math.random()*0.8),y:H*(0.22+Math.random()*0.68),vx:0,vy:0,sp:0.8+Math.random()*1.4,ph:Math.random()*7});}
   else for(const f of fireflies){f.x=clamp(f.x,4,W-4);f.y=clamp(f.y,H*0.18,H-4);}
   bgKey=-1;
+  bakeBelow();
 }
 
 /* ---------- static background (same grove every time) ---------- */
@@ -628,7 +640,7 @@ function emitSpores(x,y,n,c){for(let i=0;i<n;i++){if(spores.length>220)spores.sh
 
 /* ---------- audio ---------- */
 const BPM=112,BEAT=60/BPM,STEP=BEAT/4;
-let actx=null,master,beatBus,beatFilter,beatGain,rainGain,revIn,noiseBuf,audioOn=false,beatStart=0,nextStep=0,nextTime=0,schedTimer=null;
+let actx=null,master,beatBus,beatFilter,beatGain,rainGain,windGain,revIn,noiseBuf,audioOn=false,beatStart=0,nextStep=0,nextTime=0,schedTimer=null;
 const visT0=performance.now()/1000;
 const mtof=m=>440*Math.pow(2,(m-69)/12);
 function env(g,t,a,peak,dec){g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(peak,t+a);g.gain.exponentialRampToValueAtTime(0.0001,t+a+dec);}
@@ -646,7 +658,7 @@ function initAudio(){
   beatBus.connect(beatFilter);beatFilter.connect(beatGain);beatGain.connect(master);const bs=actx.createGain();bs.gain.value=0.4;beatGain.connect(bs);bs.connect(revIn);
   // wind
   const wl=actx.sampleRate*4,wb=actx.createBuffer(1,wl,actx.sampleRate),wd=wb.getChannelData(0);let lastB=0;for(let i=0;i<wl;i++){lastB=(lastB+0.02*(Math.random()*2-1))/1.02;wd[i]=lastB*3.5;}
-  const ws=actx.createBufferSource();ws.buffer=wb;ws.loop=true;const wf=actx.createBiquadFilter();wf.type='lowpass';wf.frequency.value=520;const wg=actx.createGain();wg.gain.value=0.12;
+  const ws=actx.createBufferSource();ws.buffer=wb;ws.loop=true;const wf=actx.createBiquadFilter();wf.type='lowpass';wf.frequency.value=520;const wg=actx.createGain();wg.gain.value=0.12;windGain=wg;
   const lfo=actx.createOscillator();lfo.frequency.value=0.06;const lg=actx.createGain();lg.gain.value=0.06;lfo.connect(lg);lg.connect(wg.gain);ws.connect(wf);wf.connect(wg);wg.connect(master);ws.start();lfo.start();
   // rain on leaves
   const rs=actx.createBufferSource();rs.buffer=noiseBuf;rs.loop=true;rs.loopEnd=1.7;const rf=actx.createBiquadFilter();rf.type='bandpass';rf.frequency.value=2200;rf.Q.value=0.35;
@@ -663,9 +675,12 @@ const ROOTS=[33,29,36,31],CHORDS=[[57,60,64],[53,57,60],[55,60,64],[55,59,62]],B
 function schedule(){
   if(!actx||actx.state!=='running')return;
   while(nextTime<actx.currentTime+0.12){playStep(nextStep,nextTime);nextTime+=STEP;nextStep++;}
-  beatGain.gain.setTargetAtTime(0.0001+0.6*beatLevel(lightLevel()),actx.currentTime,1.5);
-  rainGain.gain.setTargetAtTime(0.0001+0.2*sky().rain,actx.currentTime,2);
-  beatFilter.frequency.setTargetAtTime(Date.now()<leanUntil?2600:420,actx.currentTime,Date.now()<leanUntil?0.5:1.6);
+  // below the moss: the beat becomes a thump in the soil, the wind and rain go distant
+  const under=view===1,lean=!under&&Date.now()<leanUntil;
+  beatGain.gain.setTargetAtTime(0.0001+0.6*beatLevel(lightLevel())*(under?1.5:1),actx.currentTime,1.5);
+  rainGain.gain.setTargetAtTime(0.0001+(under?0.05:0.2)*sky().rain,actx.currentTime,1.2);
+  windGain.gain.setTargetAtTime(under?0.025:0.12,actx.currentTime,1.2);
+  beatFilter.frequency.setTargetAtTime(under?190:lean?2600:420,actx.currentTime,lean?0.5:1.2);
 }
 function playStep(step,t){
   const s=step%16,bar=Math.floor(step/16),ci=bar%4;
@@ -704,7 +719,8 @@ const PARTY=[[255,95,191],[80,226,255],[255,180,80],[170,120,255]];
 
 /* ---------- messages ---------- */
 let logTimer;
-function say(msg,ms){logEl.textContent=msg;logEl.style.opacity='1';clearTimeout(logTimer);logTimer=setTimeout(()=>{logEl.style.opacity='0';},ms||6500);}
+let lastSayAt=-1e9;
+function say(msg,ms){lastSayAt=performance.now();logEl.textContent=msg;logEl.style.opacity='1';clearTimeout(logTimer);logTimer=setTimeout(()=>{logEl.style.opacity='0';},ms||6500);}
 function fruitedBetween(aMs,bMs){const a=aMs/60000,b=bMs/60000;let n=0;for(const s of SPOTS){const P=s.period,f=t=>Math.floor((t+s.off-0.42*P)/P);n+=Math.max(0,f(b)-f(a));}return n;}
 function awayLine(sinceMs){
   const now=Date.now(),n=fruitedBetween(sinceMs,now);
@@ -718,8 +734,18 @@ function awayLine(sinceMs){
 
 /* ---------- main loop ---------- */
 let lastList=[],lastFrame=performance.now(),lastLvl=0.5,swellCool=0;
+/* ---------- two views: the clearing, and below the moss ---------- */
+let view=0,viewP=0;
 function frame(now){
   const tS=now/1000,dt=Math.min(0.05,(now-lastFrame)/1000);lastFrame=now;
+  viewP+=(view-viewP)*(reduce?1:Math.min(1,dt*5));if(Math.abs(view-viewP)<0.003)viewP=view;
+  const off=Math.round(viewP*H);
+  if(viewP<1){ctx.save();ctx.translate(0,-off);above(now,tS,dt);ctx.restore();}
+  if(viewP>0){ctx.save();ctx.translate(0,H-off);below(tS,dt);ctx.restore();}
+  ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
+  requestAnimationFrame(frame);
+}
+function above(now,tS,dt){
   const wet=sky().rain,L=lightLevel(),warm=warmth(),key=Math.round(L*20)*200+Math.round(warm*10)*10+Math.round(wet*5);
   if(key!==bgKey){buildBG(L,warm,wet);bgKey=key;}
   ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
@@ -842,12 +868,143 @@ function frame(now){
   lastLvl=lvl;
   if(entered){const raining=sk.rain>0.25;if(raining!==wasRaining){if(wasRaining!==null)say(raining?'Rain moves in. The moss drinks it up.':'The rain eases off. Everything smells like earth.');if(raining)note('rain');wasRaining=raining;}}
   if(entered&&!showerAnnounced&&L<0.12){showerAnnounced=true;if(sk.sh&&sk.sh.i>0.25){const nm=sk.sh.name;setTimeout(()=>say(`The ${nm} are falling tonight. Keep an eye on the sky.`,8000),10000);}}
-
-  requestAnimationFrame(frame);
 }
 
+/* ---------- below the moss ---------- */
+const belowBg=document.createElement('canvas'),netLayer=document.createElement('canvas');
+let belowMask=new Uint8Array(1),netCache=new Map(),netKey='',NETS=[],belowFlash=null,prevKick=0,wormT=Math.random()*200;
+const sparks=[],dust=[],drips=[],GS={x:0,y:0};
+const TRUNKS=[0.31,0.55,0.76];
+function bakeBelow(){
+  belowBg.width=W;belowBg.height=H;netLayer.width=W;netLayer.height=H;belowMask=new Uint8Array(W*H);netCache=new Map();netKey='';
+  const surf=G.surf,b=belowBg.getContext('2d'),img=b.createImageData(W,H),d=img.data;
+  const P=(x,y,c,m)=>{x=Math.round(x);y=Math.round(y);if(x<0||y<0||x>=W||y>=H)return;const i=(y*W+x)*4;d[i]=c[0];d[i+1]=c[1];d[i+2]=c[2];d[i+3]=255;if(m)belowMask[y*W+x]=m;};
+  const rng=mulberry(1201),BANDS=[[0,[40,29,23]],[0.3,[50,36,27]],[0.58,[66,47,35]],[0.8,[76,57,44]],[0.9,[50,50,56]]];
+  const soil=f=>{let i=0;while(i<BANDS.length-1&&f>=BANDS[i+1][0])i++;const a=BANDS[i],nb=BANDS[Math.min(i+1,BANDS.length-1)];const edge=nb[0]-f;return edge<0.035&&edge>0&&nb!==a?[a[1],nb[1],1-edge/0.035]:[a[1],a[1],0];};
+  for(let y=surf;y<H;y++){const f=(y-surf)/(H-surf);for(let x=0;x<W;x++){
+    let c;if(y<surf+2)c=y===surf?[56,94,58]:[34,66,42];else if(y<surf+6)c=rng()<0.3?[96,62,34]:[52,38,26];
+    else{const [c0,c1,t]=soil(f);c=t*16>BAYER[y&3][x&3]?c1:c0;const n=rng();if(n<0.05)c=mix(c,[150,130,110],0.35);else if(n<0.09)c=shade(c,0.7);}
+    P(x,y,c);}}
+  // stones
+  for(let i=0;i<9;i++){const cx=rng()*W,cy=surf+(H-surf)*(0.35+rng()*0.6),rx=2+Math.floor(rng()*5),ry=1+Math.floor(rng()*3);
+    for(let y=-ry;y<=ry;y++)for(let x=-rx;x<=rx;x++)if((x*x)/(rx*rx+0.1)+(y*y)/(ry*ry+0.1)<=1)P(cx+x,cy+y,y<0&&x<0?[112,110,116]:[86,84,92],2);}
+  // bedrock
+  for(let x=0;x<W;x++){const top=H-4-Math.round(3*Math.sin(x*0.13)+2*Math.sin(x*0.41));for(let y=top;y<H;y++)P(x,y,(x+y)%5?[44,44,52]:[58,58,66],2);}
+  // the pond, cut in half
+  const pd=G.pond;for(let y=0;y<14;y++){const w=Math.round(pd.rx*Math.sqrt(Math.max(0,1-(y/14)**2)));for(let x=-w-1;x<=w+1;x++)P(pd.cx+x,surf+y,Math.abs(x)>w-1?[30,26,24]:mix([16,32,60],[8,14,30],y/14),3);}
+  // cedar roots
+  const rootC=[58,42,33],rootH=[78,58,44];
+  const root=(x,y,a,len,w0,dep,rr)=>{for(let i=0;i<len;i++){a+=(rr()-0.5)*0.32;a+=(Math.PI/2-a)*0.02;x+=Math.cos(a);y+=Math.sin(a)*0.9;if(y>H-8||x<-4||x>W+4)return;
+    const w=Math.max(1,Math.round(w0*(1-i/len)));for(let k=0;k<w;k++)P(x+k-Math.floor(w/2),y,k===0&&w>1?rootH:rootC,1);
+    if(rr()<0.05&&dep<4&&len-i>8)root(x,y,a+(rr()<0.5?-1:1)*(0.5+rr()*0.7),(len-i)*0.6,Math.max(1,w-1),dep+1,rr);}};
+  const trunks=[...TRUNKS.map(f=>Math.round(f*W)+4),6,W-6];
+  trunks.forEach((tx,ti)=>{const rr=mulberry(500+ti*31),n=ti<3?4:3;for(let r=0;r<n;r++){const a=ti===3?0.3+r*0.35:ti===4?Math.PI-0.3-r*0.35:0.35+r*(2.4/(n-1));root(tx,surf+2,a,90+rr()*110,ti<3?4:5,0,rr);}});
+  // something buried near the cedars
+  GS.x=Math.round(W*0.14);GS.y=Math.round(surf+(H-surf)*0.5);for(let i=0;i<6;i++)P(GS.x-3+i,GS.y+Math.round(i*0.5),i===0||i===5?[90,90,96]:[150,255,170],4);
+  b.putImageData(img,0,0);
+}
+function genNet(seed,x0,y0,budget,trail){
+  const rng=mulberry(seed),pts=[{x:x0,y:y0,p:-1}];let tips=[];const n0=3+Math.floor(rng()*3);
+  for(let i=0;i<n0;i++)tips.push({x:x0,y:y0,a:Math.PI/2+(rng()-0.5)*2.4,i:0});
+  while(pts.length<budget&&tips.length){const next=[];
+    for(const t of tips){t.a+=(rng()-0.5)*0.7;t.a+=(Math.PI/2-t.a)*0.045;const nx=t.x+Math.cos(t.a),ny=t.y+Math.sin(t.a)*1.2;
+      if(ny<y0||ny>H-9||nx<1||nx>W-2)continue;t.x=nx;t.y=ny;pts.push({x:Math.round(nx),y:Math.round(ny),p:t.i});t.i=pts.length-1;next.push(t);
+      if(rng()<0.045&&next.length<28)next.push({x:nx,y:ny,a:t.a+(rng()<0.5?-1:1)*(0.6+rng()*0.7),i:t.i});
+      if(pts.length>=budget)break;}
+    tips=next;}
+  if(trail){pts.trail=pts.length;let x=x0,y=y0+4,a;const lo=G.surf+6,hi=G.surf+30;
+    while(x>0){a=Math.PI+(rng()-0.5)*0.9;x+=Math.cos(a);y=clamp(y+Math.sin(a)*0.8,lo,hi);pts.push({x:Math.round(x),y:Math.round(y),p:pts.length-1});}
+    if(pts.length>pts.trail)pts[pts.trail].p=0;}
+  return pts;
+}
+function buildNets(){
+  const now=Date.now(),tMin=now/60000,nets=[];
+  for(const s of SPOTS){const ph=((tMin+s.off)/s.period)%1;nets.push({id:'s'+s.id,kind:'spot',sp:s.sp,x:spotPos(s).x,grow:1,fade:1,fruiting:!!cycleState(ph),budget:WOOD[s.sp]?160:380,seed:s.id*101+3});}
+  for(const c of state.colonies){const st=colonyState(c,now);if(st==='gone')continue;const age=now-c.born;if(age<0)continue;const inc=INCUB[c.sp]*HOUR;
+    nets.push({id:'c'+c.id,kind:'col',sp:c.sp,x:spotPos(c).x,col:c,grow:age<inc?0.06+0.94*(age/inc):1,fade:clamp((c.born+colonyLife(c)-now)/(12*HOUR),0.25,1),budget:WOOD[c.sp]?200:460,seed:(c.id%99991)+17});}
+  for(const n of nets){let pts=netCache.get(n.id);if(!pts){pts=genNet(n.seed,n.x,G.surf+2,n.budget,n.sp==='lantern');netCache.set(n.id,pts);}n.pts=pts;n.drawn=Math.min(pts.length,Math.max(1,Math.floor(pts.length*n.grow)));}
+  return nets;
+}
+const netColor=sp=>sp==='lantern'?[255,120,205]:sp==='mycena'?[160,240,215]:[228,230,214];
+function paintNets(){withCtx(netLayer.getContext('2d'),()=>{ctx.clearRect(0,0,W,H);
+  for(const n of NETS){const col=netColor(n.sp),a0=(n.kind==='spot'?0.3:0.42)*n.fade,len=n.pts.length;
+    for(let i=0;i<n.drawn;i++){const p=n.pts[i];R(p.x,p.y,1,1,col,a0*(1-0.55*i/len));}
+    R(n.x-1,G.surf+2,3,2,col,0.45*n.fade);}});}
+function wormAt(t){return{x:W*(0.5+0.4*Math.sin(t/37+1)),y:G.surf+(H-G.surf)*(0.42+0.12*Math.sin(t/53))+5*Math.sin(t/11)};}
+function below(tS,dt){
+  const L=lightLevel(),sk=sky(),surf=G.surf,bt=beatTime(),e=reduce?0.3:kickEnv(bt),lvl=beatLevel(L);
+  ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
+  ctx.drawImage(belowBg,0,0);
+  // the clearing, seen edge-on above the cut
+  const airT=mix(mix([8,12,30],[70,104,100],L),[40,44,54],sk.rain*0.5),airB=mix(mix([18,24,40],[96,130,104],L),[48,52,60],sk.rain*0.5);
+  for(let y=0;y<surf;y++)R(0,y,W,1,mix(airT,airB,y/surf));
+  for(const f of TRUNKS){const x=Math.round(f*W);R(x,0,8,surf,[12,14,22]);}
+  R(0,0,13,surf,[6,8,11]);R(W-13,0,13,surf,[6,8,11]);
+  const lg=G.log,st=G.stump;R(lg.x0,surf-7,lg.x1-lg.x0,7,[50,37,30]);R(lg.x0,surf-7,lg.x1-lg.x0,1,[66,98,60]);for(let x=lg.x0+3;x<lg.x1;x+=7)R(x,surf-4,4,1,[30,22,19]);
+  R(st.x-6,surf-9,12,9,[50,37,30]);R(st.x-6,surf-9,12,1,[120,92,66]);
+  const lf=0.62+0.38*L,now=Date.now(),tMin=now/60000,shown=[];
+  for(const s of SPOTS){const x=(tMin+s.off)/s.period,k=Math.floor(x),c=cycleState(x-k);if(c)shown.push([s,c,0.85+0.3*hash(s.id*131+k)]);}
+  for(const c of state.colonies){const s2=colonyState(c,now);if(s2&&s2!=='gone'&&!s2.hidden&&!(c.sp==='lantern'&&L>0.35))shown.push([c,s2,0.95]);}
+  for(const [s,c,v] of shown){const x=spotPos(s).x,y=s.a==='log'?surf-2:s.a==='stump'?surf-3:surf;drawShroom(s.sp,x,y,c.g,c.d,v,s.side||1,lf,L);
+    if(s.sp==='lantern'){ctx.globalCompositeOperation='lighter';glow(x,y-6,10*c.g,[255,96,190],(0.22+0.5*e*Math.max(lvl,0.3))*(1-c.d));ctx.globalCompositeOperation='source-over';}}
+  // mycelium networks, repainted only when something has grown
+  NETS=buildNets();const key=NETS.map(n=>n.id+':'+Math.round(n.grow*25)+':'+Math.round(n.fade*4)).join(',');
+  if(key!==netKey){netKey=key;paintNets();}
+  ctx.drawImage(netLayer,0,0);
+  ctx.globalCompositeOperation='lighter';
+  if(belowFlash&&tS-belowFlash.t<1.4){const n=NETS.find(q=>q.id===belowFlash.id);if(n){const a=1-(tS-belowFlash.t)/1.4,col=netColor(n.sp);for(let i=0;i<n.drawn;i++){const p=n.pts[i];R(p.x,p.y,1,1,col,0.55*a);}}}
+  // nutrients flowing toward the mushrooms
+  if(Math.random()<dt*7&&sparks.length<34){const cands=NETS.filter(n=>n.drawn>24);if(cands.length){const n=cands[Math.floor(Math.random()*cands.length)];sparks.push({pts:n.pts,i:Math.floor(n.drawn*(0.4+Math.random()*0.6))-1,acc:0,c:mix(netColor(n.sp),[255,255,255],0.4)});}}
+  for(let i=sparks.length-1;i>=0;i--){const s=sparks[i];s.acc+=dt;while(s.acc>0.03&&s.i>=0){s.acc-=0.03;s.i=s.pts[s.i].p;}if(s.i<0){sparks.splice(i,1);continue;}const p=s.pts[s.i];R(p.x,p.y,1,1,s.c,0.85);}
+  // the lantern threads carry the beat away toward the music
+  for(const n of NETS){if(n.sp!=='lantern'||!n.pts.trail||n.drawn<=n.pts.trail)continue;const tl=n.drawn-n.pts.trail,ph=((bt/BEAT)%1+1)%1,head=n.pts.trail+Math.floor(ph*tl);
+    for(let k=0;k<6;k++){const p=n.pts[head-k];if(p&&head-k>=n.pts.trail)R(p.x,p.y,1,1,[255,140,215],(0.9-k*0.14)*(0.4+0.6*lvl));}}
+  glow(GS.x,GS.y+1,9,[120,255,160],0.14+0.06*Math.sin(tS*0.8));
+  ctx.globalCompositeOperation='source-over';
+  // the beat, felt through the soil
+  if(e>0.92&&prevKick<=0.92&&lvl>0.3&&!reduce){for(let i=0;i<Math.round(2+lvl*3);i++)dust.push({x:14+Math.random()*(W-28),y:surf+3+Math.random()*4,v:3+Math.random()*5,life:1});}
+  prevKick=e;
+  for(let i=dust.length-1;i>=0;i--){const p=dust[i];p.y+=p.v*dt;p.life-=dt*0.8;if(p.life<=0){dust.splice(i,1);continue;}R(p.x,p.y,1,1,[150,124,96],0.7*p.life);}
+  // rain soaking down
+  if(sk.rain>0.1&&Math.random()<dt*sk.rain*14)drips.push({x:14+Math.random()*(W-28),y:surf+2,v:2+Math.random()*3});
+  for(let i=drips.length-1;i>=0;i--){const p=drips[i];p.y+=p.v*dt;const dpt=p.y-surf;if(dpt>60){drips.splice(i,1);continue;}R(p.x,p.y,1,1,[110,150,210],0.6*(1-dpt/60));}
+  // an earthworm, minding its own business
+  const w=worm;w.t+=dt*(tS<w.startle+4?4:1);const head=wormAt(w.t);w.hx=head.x;w.hy=head.y;
+  for(let k=12;k>=0;k--){const p=k?wormAt(w.t-k*0.7):head;R(p.x,p.y,2,2,k?(k%4===0?[176,104,108]:[196,122,124]):[220,146,146]);}
+}
+const worm={t:Math.random()*300,startle:-99,hx:0,hy:0};
+function netLine(n){
+  const nm=NAMES[n.sp],Nm=capFirst(nm);
+  if(n.kind==='spot')return n.fruiting?`An old ${nm} network. It's fruiting right now.`:`An old ${nm} network, resting between flushes.`;
+  const c=n.col,now=Date.now(),st=colonyState(c,now);
+  if(c.sp==='lantern')return st&&st.hidden?'Pink threads, spreading toward the music.':'Pink threads, running off toward the music.';
+  if(st&&st.hidden){const h=Math.ceil((c.born+INCUB[c.sp]*HOUR-now)/HOUR);return `${Nm} mycelium, still spreading. It should fruit ${h<=1?'within the hour':`in about ${h} hours`}.`;}
+  const days=Math.floor((now-c.born)/864e5),age=days<1?'less than a day old':`${days} day${days>1?'s':''} old`,left=c.born+colonyLife(c)-now;
+  return `${Nm} mycelium, ${age}. ${st?'Fruiting now.':left<12*HOUR?'It\'s nearly spent.':'Resting. Rain will wake it.'}`;
+}
+function tapBelow(x,y){
+  const tS=performance.now()/1000,pan=(x/W)*2-1;
+  if(y<G.surf)return say('Up there, the grove carries on without you.');
+  if(Math.hypot(x-worm.hx,y-worm.hy)<7){worm.startle=tS;blip(pan);say('An earthworm, minding its own business. It speeds up.');note('worm');return;}
+  if(Math.hypot(x-GS.x,y-GS.y)<7){chime(PENTA[4]+12,pan,0.05);say('A glow stick, still faintly glowing. How long has it been down here?');note('glowstick');return;}
+  let hit=null,bd=4;for(const n of NETS)for(let i=0;i<n.drawn;i+=2){const p=n.pts[i],dd=Math.abs(p.x-x)+Math.abs(p.y-y);if(dd<bd){bd=dd;hit=n;}}
+  if(hit){belowFlash={id:hit.id,t:tS};chime(PENTA[NOTE[hit.sp]],pan,0.08);say(netLine(hit));return;}
+  const m=belowMask[Math.round(y)*W+Math.round(x)];
+  if(m===1){puff(pan);return say('Cedar roots. The mycelium wraps around them, trading sugar for water and minerals.');}
+  if(m===2)return say('A stone, older than everything else down here.');
+  if(m===3){plop(pan);return say('The bottom of the pond. Cold and very still.');}
+  say(sky().rain>0.25?'Cool, wet soil. The rain is finding its way down.':'Cool, damp soil. The beat comes through as a slow thump.');
+}
+const vBtn=document.getElementById('vbtn');
+function setView(v){
+  if(v===view)return;view=v;vBtn.textContent=v?'Back up':'Go below';vBtn.setAttribute('aria-pressed',v?'true':'false');
+  if(v){const first=!state.journal.web;note('web',true);if(first)say('Below the moss. Every mushroom up there is just the fruit of this.',8000);}
+  updateStatus();
+}
+vBtn.addEventListener('click',()=>setView(view?0:1));
+
 /* ---------- status ---------- */
-function updateStatus(){const s=sky(),n=lastList.filter(m=>m.stage==='mature').length;const phase=s.alt>=6?'Day':s.alt>=-6?(s.rising?'Dawn':'Dusk'):'Night';statusEl.textContent=`${phase}${s.rain>0.25?' · Rain':''} · ${n} fruiting`;}
+function updateStatus(){if(view){statusEl.textContent=`Below the moss · ${NETS.length||'—'} networks`;return;}const s=sky(),n=lastList.filter(m=>m.stage==='mature').length;const phase=s.alt>=6?'Day':s.alt>=-6?(s.rising?'Dawn':'Dusk'):'Night';statusEl.textContent=`${phase}${s.rain>0.25?' · Rain':''} · ${n} fruiting`;}
 setInterval(updateStatus,2000);
 
 /* ---------- ambient events ---------- */
@@ -873,8 +1030,18 @@ function addPulse(x,y){
     pulses.push({s,t0,dur:s.length/45,key:m.key,sp:m.sp,tx:m.x,ty:m.top||m.y});}
   return targets.length;
 }
-cv.addEventListener('pointerdown',ev=>{
-  const r=cv.getBoundingClientRect(),x=(ev.clientX-r.left)/r.width*W,y=(ev.clientY-r.top)/r.height*H,tS=performance.now()/1000,pan=(x/W)*2-1;
+let down=null;
+cv.addEventListener('pointerdown',ev=>{down={x:ev.clientX,y:ev.clientY};try{cv.setPointerCapture(ev.pointerId);}catch(e){}});
+cv.addEventListener('pointercancel',()=>{down=null;});
+cv.addEventListener('pointerup',ev=>{
+  if(!down)return;const d=down;down=null;const dx=ev.clientX-d.x,dy=ev.clientY-d.y;
+  if(Math.abs(dy)>50&&Math.abs(dy)>Math.abs(dx)*1.5){if(dy<0)setView(1);else setView(0);return;}
+  if(Math.hypot(dx,dy)>12||viewP!==view)return;
+  const r=cv.getBoundingClientRect(),x=(d.x-r.left)/r.width*W,y=(d.y-r.top)/r.height*H;
+  if(view)tapBelow(x,y);else tapAbove(x,y);
+});
+function tapAbove(x,y){
+  const tS=performance.now()/1000,pan=(x/W)*2-1;
   // shooting stars
   for(const m of meteors){if(m.wished||m.age>m.life+0.6)continue;const t=Math.min(m.age,m.life);if(segDist(x,y,m.x,m.y,m.x+m.vx*t,m.y+m.vy*t)<9){m.wished=true;
     const e=state.journal.meteor||(state.journal.meteor={first:Date.now(),looks:1});e.wishes=(e.wishes||0)+1;save();
@@ -911,7 +1078,7 @@ cv.addEventListener('pointerdown',ev=>{
     say(under?'Something is spreading under the moss here.':hit?'The network hums under the moss.':'The moss is quiet here.');return;}
   // sky / canopy
   attract={x,y,until:tS+6};chime(PENTA[5+Math.floor(Math.random()*2)]+12,pan,0.04);say('The fireflies drift closer.');note('fireflies');
-});
+}
 
 /* ---------- prints you carry ---------- */
 const heldBtn=document.getElementById('held'),heldC=document.getElementById('heldc'),heldT=document.getElementById('heldt');
@@ -952,11 +1119,16 @@ function drawSighting(id){
   if(id==='folk'){const s=SPR.ears,x0=10,y0=10;s.rows.forEach((row,j)=>{for(let i=0;i<row.length;i++)if(row[i]==='X')R(x0+i,y0+j,1,1,body);});for(const [ex,ey] of s.eyes)R(x0+ex,y0+ey,1,1,[255,211,107]);}
   if(id==='dancers'){ctx.globalCompositeOperation='lighter';glow(12,12,14,[255,95,191],0.5);ctx.globalCompositeOperation='source-over';for(let i=0;i<5;i++){const x=4+i*4,y=17-(i%2);R(x,y-3,1,3,[4,4,8]);R(x,y-4,1,1,[4,4,8]);}}
   if(id==='meteor'){for(const [x,y] of [[3,15],[20,3],[8,4],[21,16]])R(x,y,1,1,[200,210,240]);ctx.globalCompositeOperation='lighter';for(let k=0;k<13;k++)R(18-k,13-Math.round(k*0.6),1,1,k<2?[255,255,236]:[190,212,255],1-k/13);glow(18,13,3,[255,255,236],0.5);ctx.globalCompositeOperation='source-over';}
+  if(id==='web'||id==='worm'||id==='glowstick'){R(0,0,24,20,[44,32,25]);R(0,0,24,2,[34,66,42]);R(0,0,24,1,[56,94,58]);for(const [x,y] of [[3,9],[17,14],[9,16],[20,5]])R(x,y,1,1,[70,52,40]);}
+  if(id==='web'){const rr=mulberry(77),pts=genNetMini(rr);for(const [x,y] of pts)R(x,y,1,1,[228,230,214],0.7);R(11,2,3,1,[228,230,214]);}
+  if(id==='worm'){for(let k=0;k<8;k++)R(5+k*2,10+Math.round(Math.sin(k*0.9)*2),2,1,k===7?[220,146,146]:k%3===0?[176,104,108]:[196,122,124]);}
+  if(id==='glowstick'){ctx.globalCompositeOperation='lighter';glow(12,11,8,[120,255,160],0.35);ctx.globalCompositeOperation='source-over';for(let i=0;i<7;i++)R(9+i,8+Math.round(i*0.6),1,1,i===0||i===6?[90,90,96]:[150,255,170]);}
   if(id==='rain'){for(let y=15;y<20;y++)R(3+(y===15||y===19?2:0),y,18-(y===15||y===19?4:0),1,[9,18,40]);R(9,17,6,1,[120,150,200]);
     for(const [x,y] of [[4,2],[10,5],[16,1],[20,7],[7,10],[14,9],[19,12],[3,8],[12,1]]){R(x,y,1,1,[170,190,225]);R(x+1,y-1,1,1,[170,190,225],0.6);}}
   if(id==='fireflies'){ctx.globalCompositeOperation='lighter';for(const [x,y] of [[6,7],[15,5],[11,13],[19,12]]){glow(x,y,4,[210,255,120],0.5);R(x,y,1,1,[240,255,180]);}}
   ctx.globalCompositeOperation='source-over';
 }
+function genNetMini(rng){const out=[];for(let t=0;t<5;t++){let x=12,y=3,a=Math.PI/2+(rng()-0.5)*2.4;for(let i=0;i<16;i++){a+=(rng()-0.5)*0.8;x+=Math.cos(a);y+=Math.sin(a)*0.7;if(y<3||y>19)break;out.push([x,y]);}}return out;}
 function sketch(j,known){
   const c=document.createElement('canvas');c.width=24;c.height=20;c.className='jsketch';const c2=c.getContext('2d');
   withCtx(c2,()=>{

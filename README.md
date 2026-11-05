@@ -15,6 +15,7 @@ Open the link in Chrome, tap the ⋮ menu, then **Add to Home screen** (or **Ins
 - Scattered spores spread unseen for a day or two, then flush on and off for days, more after rain
 - The wind seeds new colonies on its own; some species only ever arrive that way
 - Rain comes and goes in spells, wetter in autumn
+- Swipe up (or tap **Go below**) to see under the moss: every mycelium network at its real age, cedar roots, and the beat felt through the soil
 - Shadow folk, an owl, a pond frog, fireflies, and a party you're never quite invited to
 - Ambient sound and a muffled beat that swells and fades
 - Daylight follows the real sun over Vernon, BC, with sunset colours and stars after dark
