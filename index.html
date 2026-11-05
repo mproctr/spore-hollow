@@ -1122,15 +1122,23 @@ document.getElementById('heldmain').addEventListener('click',()=>{
   say(`Tap ${whereTo(sp)} to scatter the spores. The glinting spots will take them.`,6000);
 });
 // while you hold a print, the ground that will take it glints faintly
+// slow glints that fade in and out, instead of a per-frame flicker
+const hintGlints=[];let hintLast=0;
 function groundHints(tS){
-  const sp=state.held;if(!sp||!entered)return;
-  const boost=tS<showGround,n=boost?14:2,c=PRINT[sp].glow||[200,255,220];
-  if(Math.random()>(boost?1:0.5))return;
+  const sp=state.held;
+  if(!sp||!entered){hintGlints.length=0;return;}
+  const dt=Math.min(0.05,tS-hintLast||0);hintLast=tS;
+  const boost=tS<showGround,c=PRINT[sp].glow||[200,255,220],rate=boost?5:1;
+  if(Math.random()<dt*rate&&hintGlints.length<(boost?14:5)){
+    let x,y;
+    if(WOOD[sp]){const lg=G.log,st=G.stump,onSt=Math.random()<0.3;x=onSt?st.x-5+Math.random()*10:lg.x0+2+Math.random()*(lg.x1-lg.x0-4);y=onSt?st.y-st.h-1:lg.y-lg.h+1+Math.random()*(lg.h-2);}
+    else{x=16+Math.random()*(W-32);y=G.gy+6+Math.random()*(G.gh-10);if(inPond(x,y)||onLog(x,y))x=null;}
+    if(x!==null)hintGlints.push({x,y,age:0,life:1.6+Math.random()*1});
+  }
   ctx.globalCompositeOperation='lighter';
-  if(WOOD[sp]){const lg=G.log,st=G.stump;
-    if(boost){for(let x=lg.x0;x<lg.x1;x+=2)R(x,lg.y-lg.h-1,1,1,c,0.35+0.25*Math.sin(tS*4+x));for(let x=st.x-6;x<st.x+6;x+=2)R(x,st.y-st.h-2,1,1,c,0.35+0.25*Math.sin(tS*4+x));}
-    for(let i=0;i<n;i++){const onSt=Math.random()<0.3,x=onSt?st.x-5+Math.random()*10:lg.x0+Math.random()*(lg.x1-lg.x0),y=onSt?st.y-st.h-1-Math.random()*2:lg.y-lg.h+Math.random()*lg.h;glow(x,y,3,c,0.5);}}
-  else for(let i=0;i<n;i++){const x=16+Math.random()*(W-32),y=G.gy+6+Math.random()*(G.gh-10);if(inPond(x,y)||onLog(x,y))continue;glow(x,y,boost?3:2.5,c,boost?0.55:0.4);}
+  if(WOOD[sp]&&boost){const lg=G.log,st=G.stump,a=0.1+0.05*Math.sin(tS*1.5);R(lg.x0,lg.y-lg.h-1,lg.x1-lg.x0,1,c,a);R(st.x-6,st.y-st.h-2,12,1,c,a);}
+  for(let i=hintGlints.length-1;i>=0;i--){const g=hintGlints[i];g.age+=dt;if(g.age>=g.life){hintGlints.splice(i,1);continue;}
+    const a=Math.sin(Math.PI*g.age/g.life)*(boost?0.28:0.16);glow(g.x,g.y,2.5,c,a);R(g.x,g.y,1,1,c,a*1.4);}
   ctx.globalCompositeOperation='source-over';
 }
 function takePrint(sp,fresh){
