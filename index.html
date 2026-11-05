@@ -93,6 +93,7 @@ body {
   background: var(--panel);
   border: 1px solid rgba(143, 247, 208, 0.28);
   padding: 9px 11px; min-height: 34px;
+  white-space: nowrap;
   border-radius: 0;
   cursor: pointer;
 }
@@ -140,15 +141,17 @@ body {
 .jentry.locked h4 { color: var(--dim); font-size: 15px; }
 .held {
   pointer-events: auto;
-  display: flex; align-items: center; gap: 8px;
-  margin-top: 6px; padding: 5px 10px 5px 5px; max-width: 210px;
-  background: var(--panel); color: var(--ink);
-  border: 1px solid rgba(219, 230, 210, 0.25); border-radius: 0;
-  font: 400 10px/1.35 var(--label); letter-spacing: 0.08em; text-transform: uppercase; text-align: left;
-  cursor: pointer;
+  display: flex; align-items: stretch;
+  margin-top: 6px; max-width: 196px;
+  background: var(--panel);
+  border: 1px solid rgba(143, 247, 208, 0.45);
+  box-shadow: 0 0 10px rgba(143, 247, 208, 0.15);
 }
+.held button { background: none; border: 0; border-radius: 0; color: var(--ink); cursor: pointer; font: 400 10px/1.35 var(--label); letter-spacing: 0.08em; text-transform: uppercase; text-align: left; }
+.heldmain { display: flex; align-items: center; gap: 7px; padding: 5px 8px 5px 5px; min-width: 0; }
+.heldgo { padding: 0 8px; color: var(--dim) !important; border-left: 1px solid var(--rule-strong) !important; font-size: 9px !important; white-space: nowrap; }
 .held canvas { width: 28px; height: 28px; image-rendering: pixelated; flex: none; }
-.held small { display: block; color: var(--dim); font-size: 9px; }
+.held small { display: block; color: var(--glow); font-size: 9px; text-transform: none; letter-spacing: 0.04em; }
 .jhint { margin: 0 0 4px; font: 400 15px/1.4 var(--display); color: var(--dim); font-style: italic; }
 .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 16px 10px; padding: 10px 0 6px; }
 .pcell { margin: 0; display: grid; justify-items: center; align-content: start; gap: 7px; text-align: center; }
@@ -211,7 +214,10 @@ button:focus-visible { outline: 2px solid var(--cap); outline-offset: 3px; }
 
 <div class="hud top">
   <div class="brand"><b>Spore Hollow</b><span id="status">Night</span>
-    <button id="held" class="held" type="button" hidden><canvas id="heldc" width="24" height="24"></canvas><span id="heldt"></span></button>
+    <div id="held" class="held" hidden>
+      <button id="heldmain" class="heldmain" type="button"><canvas id="heldc" width="24" height="24"></canvas><span id="heldt"></span></button>
+      <button id="heldgo" class="heldgo" type="button">Let go</button>
+    </div>
   </div>
   <div class="hright">
     <div class="hbtns">
@@ -858,6 +864,7 @@ function above(now,tS,dt){
     for(let i=0;i<want;i++){const d=drops[i];d.y+=dt*190*d.s;d.x-=dt*38*d.s;if(d.y>H||d.x<-2){d.y=-Math.random()*30;d.x=Math.random()*(W+30);}
       R(d.x,d.y,1,1,rc,0.48);R(d.x+0.3,d.y-1,1,1,rc,0.32);R(d.x+0.6,d.y-2,1,1,rc,0.16);}
     if(Math.random()<dt*sk.rain*5)ripples.push({x:pond.cx+(Math.random()*2-1)*pond.rx*0.7,y:pond.cy+(Math.random()*2-1)*pond.ry*0.5,r:0.5,life:0.7});}
+  groundHints(tS);
   // moths around the ghost mycena (they stay in when it rains)
   if(L<0.5&&sk.rain<0.2){const glowing=list.filter(m=>m.sp==='mycena'&&m.g>0.5);const anchor=glowing[0]||{x:pond.cx,y:pond.cy-2};for(let k=0;k<2;k++){const a=tS*(1.7+k*0.6)+k*3,x=anchor.x+Math.cos(a)*(6+k*3),y=anchor.y-9-k*3+Math.sin(a*1.3)*3,flap=Math.sin(tS*28+k)>0;ctx.globalCompositeOperation='source-over';R(x,y,1,1,[206,196,176]);if(flap){R(x-1,y,1,1,[170,160,144]);R(x+1,y,1,1,[170,160,144]);}else R(x,y-1,1,1,[170,160,144]);}}
   ctx.globalCompositeOperation='source-over';
@@ -1055,7 +1062,7 @@ function tapAbove(x,y){
   // the party
   const p=G.party;if(Math.abs(x-p.x)<24&&y<p.y+10&&y>p.y-60){leanUntil=Date.now()+10000;say('You lean toward the music. It leans back.');note('dancers');return;}
   // mushrooms
-  let best=null,bd=10;for(const m of lastList){if(m.speck)continue;const cy=((m.top||m.y)+m.y)/2,dd=Math.hypot(m.x-x,cy-y);if(dd<bd){bd=dd;best=m;}}
+  let best=null,bd=state.held?5:10;for(const m of lastList){if(m.speck)continue;const cy=((m.top||m.y)+m.y)/2,dd=Math.hypot(m.x-x,cy-y);if(dd<bd){bd=dd;best=m;}}
   if(best){const nm=NAMES[best.sp];flashes[best.key]=tS;emitSpores(best.x,best.top||best.y,best.stage==='mature'?16:5,PRINT[best.sp].glow||null);chime(PENTA[NOTE[best.sp]],pan,0.1);puff(pan);
     if(best.stage==='mature'&&!taken.has(best.key)){taken.add(best.key);takePrint(best.sp,note(best.sp,true));return;}
     const lines={pin:`A ${nm} pin, barely awake.`,growing:`The ${nm} is still growing.`,mature:`The ${nm} lets go of its spores.`,decay:`The ${nm} is giving itself back to the moss.`};say(lines[best.stage]||nm);note(best.sp);return;}
@@ -1082,18 +1089,37 @@ function tapAbove(x,y){
 
 /* ---------- prints you carry ---------- */
 const heldBtn=document.getElementById('held'),heldC=document.getElementById('heldc'),heldT=document.getElementById('heldt');
+let showGround=0; // when the scatter hint lights up the ground (seconds, performance clock)
+const whereTo=sp=>WOOD[sp]?(sp==='turkey'?'the stump or log':'the log or stump'):'the moss';
 function updateHeld(){
   if(!state.held){heldBtn.hidden=true;return;}
   drawPrint(heldC.getContext('2d'),state.held);
-  heldT.textContent='';heldT.append(`${capFirst(NAMES[state.held])} print`);const s=document.createElement('small');s.textContent='Tap to let it go';heldT.append(s);
+  heldT.textContent='';heldT.append(`${capFirst(NAMES[state.held])} print`);const s=document.createElement('small');s.textContent=`Tap ${whereTo(state.held)} to scatter`;heldT.append(s);
   heldBtn.hidden=false;
+}
+document.getElementById('heldmain').addEventListener('click',()=>{
+  const sp=state.held;if(!sp)return;
+  if(view){setView(0);setTimeout(()=>{showGround=performance.now()/1000+5;},700);}else showGround=performance.now()/1000+5;
+  say(`Tap ${whereTo(sp)} to scatter the spores. The glinting spots will take them.`,6000);
+});
+// while you hold a print, the ground that will take it glints faintly
+function groundHints(tS){
+  const sp=state.held;if(!sp||!entered)return;
+  const boost=tS<showGround,n=boost?14:2,c=PRINT[sp].glow||[200,255,220];
+  if(Math.random()>(boost?1:0.5))return;
+  ctx.globalCompositeOperation='lighter';
+  if(WOOD[sp]){const lg=G.log,st=G.stump;
+    if(boost){for(let x=lg.x0;x<lg.x1;x+=2)R(x,lg.y-lg.h-1,1,1,c,0.35+0.25*Math.sin(tS*4+x));for(let x=st.x-6;x<st.x+6;x+=2)R(x,st.y-st.h-2,1,1,c,0.35+0.25*Math.sin(tS*4+x));}
+    for(let i=0;i<n;i++){const onSt=Math.random()<0.3,x=onSt?st.x-5+Math.random()*10:lg.x0+Math.random()*(lg.x1-lg.x0),y=onSt?st.y-st.h-1-Math.random()*2:lg.y-lg.h+Math.random()*lg.h;glow(x,y,3,c,0.5);}}
+  else for(let i=0;i<n;i++){const x=16+Math.random()*(W-32),y=G.gy+6+Math.random()*(G.gh-10);if(inPond(x,y)||onLog(x,y))continue;glow(x,y,boost?3:2.5,c,boost?0.55:0.4);}
+  ctx.globalCompositeOperation='source-over';
 }
 function takePrint(sp,fresh){
   const e=state.prints[sp],isNew=!e;
   state.prints[sp]={first:e?e.first:Date.now(),count:(e?e.count:0)+1};state.held=sp;save();updateHeld();
   [0,2,4].forEach((k,i)=>setTimeout(()=>chime(PENTA[k],0,0.05),i*110));
   let msg=`You take a spore print from the ${NAMES[sp]}. ${PRINT[sp].line}`;
-  if(!state.tips){state.tips=1;save();msg+=' Scatter it on the moss, or let the wind have it.';}
+  if(state.tips!==2){state.tips=2;save();msg+=` Tap ${whereTo(sp)} to scatter it.`;showGround=performance.now()/1000+5;}
   else if(isNew||fresh)msg+=' New in your journal.';
   if(isNew)jBtn.classList.add('new');
   say(msg,9000);
@@ -1103,7 +1129,7 @@ function scatter(sp,pos,x,y,changed){
   emitSpores(x,y,20,PRINT[sp].glow||PRINT[sp].c);chime(PENTA[1],(x/W)*2-1,0.06);
   say(changed?'The spores drift toward the music and don\'t come back down.':`You scatter the ${NAMES[sp]} spores. Nothing happens, yet.`,7000);
 }
-heldBtn.addEventListener('click',()=>{
+document.getElementById('heldgo').addEventListener('click',()=>{
   const sp=state.held;if(!sp)return;state.held=null;
   addColony(Object.assign({sp,born:Date.now()+(1+Math.random()*5)*HOUR,src:'wind'},sp==='lantern'?{a:'g',nx:0.1+Math.random()*0.25,ny:0.03+Math.random()*0.1}:safePlace(sp,Math.random(),Math.random())));
   updateHeld();say('You let the wind take it. It\'ll land somewhere.');
