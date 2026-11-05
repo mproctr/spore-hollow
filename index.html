@@ -134,6 +134,25 @@ body {
 .jnote { font: 400 15px/1.4 var(--display); color: var(--ink); opacity: 0.88; }
 .jmeta { margin-top: 4px !important; font: 400 9px/1.4 var(--label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); font-variant-numeric: tabular-nums; }
 .jentry.locked h4 { color: var(--dim); font-size: 15px; }
+.held {
+  pointer-events: auto;
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 6px; padding: 5px 10px 5px 5px; max-width: 210px;
+  background: var(--panel); color: var(--ink);
+  border: 1px solid rgba(219, 230, 210, 0.25); border-radius: 0;
+  font: 400 10px/1.35 var(--label); letter-spacing: 0.08em; text-transform: uppercase; text-align: left;
+  cursor: pointer;
+}
+.held canvas { width: 28px; height: 28px; image-rendering: pixelated; flex: none; }
+.held small { display: block; color: var(--dim); font-size: 9px; }
+.jhint { margin: 0 0 4px; font: 400 15px/1.4 var(--display); color: var(--dim); font-style: italic; }
+.pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 16px 10px; padding: 10px 0 6px; }
+.pcell { margin: 0; display: grid; justify-items: center; align-content: start; gap: 7px; text-align: center; }
+.pprint { width: 64px; height: 64px; image-rendering: pixelated; border: 1px solid var(--rule-strong); box-shadow: 2px 2px 0 #000; }
+.pcell figcaption { font: 400 13px/1.2 var(--display); color: var(--ink); text-wrap: balance; }
+.pcell figcaption small { display: block; margin-top: 2px; font: 400 9px/1 var(--label); letter-spacing: 0.08em; color: var(--dim); font-variant-numeric: tabular-nums; }
+.pcell.locked .pprint { background: transparent; border-style: dashed; box-shadow: none; }
+.pcell.locked figcaption { color: var(--dim); font-style: italic; }
 .jentry.locked .jnote { color: var(--dim); font-style: italic; }
 #log {
   font: 400 16px/1.35 var(--display);
@@ -187,7 +206,9 @@ button:focus-visible { outline: 2px solid var(--cap); outline-offset: 3px; }
 <div id="stage"><canvas id="cv" aria-label="A mossy night grove where mushrooms grow on their own"></canvas></div>
 
 <div class="hud top">
-  <div class="brand"><b>Spore Hollow</b><span id="status">Night</span></div>
+  <div class="brand"><b>Spore Hollow</b><span id="status">Night</span>
+    <button id="held" class="held" type="button" hidden><canvas id="heldc" width="24" height="24"></canvas><span id="heldt"></span></button>
+  </div>
   <div class="hbtns">
     <button id="jbtn" class="hbtn" type="button">Journal</button>
     <button id="snd" class="hbtn" type="button" aria-pressed="false">Sound off</button>
@@ -266,10 +287,17 @@ function activeShower(now){
   return bi>0.08?{name:best.name,i:bi,dir:hash(best.name.length*7.7)<0.5?-1:1,ang:0.45+hash(best.name.length*3.1)*0.25}:null;
 }
 let skyCache={t:0};
-function sky(){const now=Date.now();if(now-skyCache.t>5000){const alt=sunAltitude(now);skyCache={t:now,alt,rising:sunAltitude(now+6e5)>alt,sh:activeShower(now)};}return skyCache;}
+/* ---------- weather: rain comes in 3-hour spells, same for everyone ---------- */
+const HOUR=3600e3,RAIN_BLOCK=3*HOUR,RAIN_FADE=25*60e3;
+const RAIN_P=[0.2,0.18,0.16,0.18,0.2,0.18,0.1,0.1,0.14,0.24,0.28,0.24]; // wetter in autumn
+function rainy(ms){const b=Math.floor(ms/RAIN_BLOCK);return hash(b*1.371+0.29)<RAIN_P[new Date(ms).getMonth()];}
+function rainLevel(ms){if(!rainy(ms))return 0;const b=Math.floor(ms/RAIN_BLOCK),into=ms-b*RAIN_BLOCK;let r=0.55+0.45*hash(b*2.9);
+  if(!rainy(ms-RAIN_BLOCK))r*=clamp(into/RAIN_FADE,0,1);if(!rainy(ms+RAIN_BLOCK))r*=clamp((RAIN_BLOCK-into)/RAIN_FADE,0,1);return r;}
+function rainAround(ms){return(+rainy(ms)+ +rainy(ms-RAIN_BLOCK)+ +rainy(ms-2*RAIN_BLOCK))/3;}
+function sky(){const now=Date.now();if(now-skyCache.t>5000){const alt=sunAltitude(now);skyCache={t:now,alt,rising:sunAltitude(now+6e5)>alt,sh:activeShower(now),rain:rainLevel(now)};}return skyCache;}
 function smooth(a,b,x){const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);}
-function lightLevel(){return smooth(-9,12,sky().alt);}
-function warmth(){return clamp(1-Math.abs(sky().alt-1)/7,0,1);}
+function lightLevel(){const s=sky();return smooth(-9,12,s.alt)*(1-0.32*s.rain);}
+function warmth(){const s=sky();return clamp(1-Math.abs(s.alt-1)/7,0,1)*(1-s.rain);}
 
 /* ---------- persistence ---------- */
 const KEY='spore-hollow-v1';
@@ -277,9 +305,13 @@ function load(){try{return JSON.parse(localStorage.getItem(KEY))||{};}catch(e){r
 const state=load();
 const prevVisit=state.last||null;
 state.first=state.first||Date.now();
-state.planted=Array.isArray(state.planted)?state.planted:[];
+delete state.planted;
 state.journal=state.journal&&typeof state.journal==='object'?state.journal:{};
-function save(){try{localStorage.setItem(KEY,JSON.stringify({first:state.first,last:Date.now(),planted:state.planted,journal:state.journal}));}catch(e){}}
+state.colonies=Array.isArray(state.colonies)?state.colonies:[];
+state.prints=state.prints&&typeof state.prints==='object'?state.prints:{};
+state.held=typeof state.held==='string'?state.held:null;
+state.lastWind=state.lastWind||Date.now();
+function save(){try{localStorage.setItem(KEY,JSON.stringify({first:state.first,last:Date.now(),journal:state.journal,colonies:state.colonies,prints:state.prints,held:state.held,lastWind:state.lastWind,tips:state.tips}));}catch(e){}}
 
 /* ---------- field journal ---------- */
 const JOURNAL=[
@@ -290,19 +322,23 @@ const JOURNAL=[
   {id:'mycena',kind:'shroom',name:'Ghost mycena',sub:'Mycena sp. (unrecorded)',hint:'By the pond, best after dark.',note:'Glows a faint green through the night. Glowing mycenas usually live in warmer forests. Nobody told this one.'},
   {id:'oyster',kind:'shroom',name:'Oyster mushroom',sub:'Pleurotus ostreatus',hint:'On the fallen log.',note:'Pale fans eating the log from the inside. It also traps and digests tiny roundworms in the wood, which is more than most mushrooms can say.'},
   {id:'turkey',kind:'shroom',name:'Turkey tail',sub:'Trametes versicolor',hint:'On the old stump.',note:'Banded like a fanned tail. Pores instead of gills, tough as leather. One of the forest\'s quiet recyclers.'},
+  {id:'hericium',kind:'shroom',name:'Bear\'s head tooth',sub:'Hericium abietis',hint:'Never planted. The wind brings it to old wood, after rain.',note:'Lion\'s mane\'s conifer cousin. No cap, no gills, just tiers of soft white spines hanging off old wood. It only turns up in the wet months, and only if it wants to.'},
+  {id:'lantern',kind:'shroom',name:'Lantern cap',sub:'Not in any field guide',hint:'Some spores scattered near the cedars don\'t come back the same.',note:'Glows magenta, only after dark, and pulses in time with something past the cedars. You didn\'t grow this. Someone else did.'},
   {id:'frog',kind:'sight',name:'The pond frog',sub:'West edge of the pond',hint:'Something lives at the edge of the pond.',note:'Croaks on its own schedule, which is not the beat\'s schedule. Has never once moved.'},
   {id:'owl',kind:'sight',name:'The owl',sub:'High in the canopy',hint:'Look up, after dark.',note:'Only its eyes, only at night. It has watched every one of your visits.'},
   {id:'folk',kind:'sight',name:'Shadow folk',sub:'At the edges of the clearing',hint:'Something in the shadows is watching.',note:'Small, dark, glowing eyes. They come for the music and stay for the moss. Shy, but they always come back.'},
   {id:'dancers',kind:'sight',name:'The dancers',sub:'Past the cedars',hint:'Follow the music.',note:'Five of them. Always five. They have never turned around.'},
   {id:'fireflies',kind:'sight',name:'Fireflies',sub:'Everywhere, sort of',hint:'Reach up toward the dark.',note:'They gather when you reach toward them and wander off the moment you stop.'},
-  {id:'meteor',kind:'sight',name:'Shooting star',sub:'Over the clearing, after dark',hint:'Watch the sky on a dark night. Tap one to make a wish.',note:'Comet dust smaller than a grain of sand, burning up 100 km overhead. They fall thickest during meteor showers: the Perseids in August, the Orionids in October (left behind by Halley\'s Comet), and the Geminids in December.'}
+  {id:'meteor',kind:'sight',name:'Shooting star',sub:'Over the clearing, after dark',hint:'Watch the sky on a dark night. Tap one to make a wish.',note:'Comet dust smaller than a grain of sand, burning up 100 km overhead. They fall thickest during meteor showers: the Perseids in August, the Orionids in October (left behind by Halley\'s Comet), and the Geminids in December.'},
+  {id:'rain',kind:'sight',name:'Rain in the hollow',sub:'Comes and goes',hint:'Wait for a wet spell.',note:'Rain is when the grove does its real work. Flushes come thicker after a wet spell, and the bear\'s head tooth only arrives after one.'}
 ];
 const JBY={};for(const j of JOURNAL)JBY[j.id]=j;
-function note(id){
+function note(id,quiet){
   let e=state.journal[id];const isNew=!e;
   if(!e)e=state.journal[id]={first:Date.now(),looks:0};
   e.looks++;save();
-  if(isNew){setTimeout(()=>say(`Added to your field journal: ${JBY[id].name}.`),2400);document.getElementById('jbtn').classList.add('new');}
+  if(isNew){if(!quiet)setTimeout(()=>say(`Added to your field journal: ${JBY[id].name}.`),2400);document.getElementById('jbtn').classList.add('new');}
+  return isNew;
 }
 
 /* ---------- the grove's fixed mushroom spots ---------- */
@@ -317,9 +353,72 @@ const SPOTS=[
   {id:17,sp:'amanita',a:'g',nx:0.38,ny:0.15}
 ];
 for(const s of SPOTS){s.period=40+hash(s.id*7.1)*70;s.off=hash(s.id*3.3)*s.period;s.key='s'+s.id;}
-const NAMES={amanita:'fly agaric',chanterelle:'chanterelle',inkcap:'shaggy ink cap',morel:'morel',mycena:'ghost mycena',oyster:'oyster cluster',turkey:'turkey tail'};
+const NAMES={amanita:'fly agaric',chanterelle:'chanterelle',inkcap:'shaggy ink cap',morel:'morel',mycena:'ghost mycena',oyster:'oyster cluster',turkey:'turkey tail',hericium:'bear\'s head tooth',lantern:'lantern cap'};
 const PENTA=[69,72,74,76,79,81,84];
-const NOTE={amanita:0,chanterelle:2,inkcap:4,morel:1,mycena:5,oyster:3,turkey:6};
+const NOTE={amanita:0,chanterelle:2,inkcap:4,morel:1,mycena:5,oyster:3,turkey:6,hericium:2,lantern:4};
+const WOOD={oyster:1,turkey:1,hericium:1};
+const capFirst=s=>s[0].toUpperCase()+s.slice(1);
+
+/* ---------- spore prints ---------- */
+const PRINT={
+  amanita:{c:[238,236,226],t:'gills',line:'White, like the flecks on its cap.'},
+  chanterelle:{c:[236,212,158],t:'ridges',line:'Pale cream, traced by ridges instead of gills.'},
+  inkcap:{c:[24,22,28],t:'gills',paper:1,line:'Black. It was going to turn to ink anyway.'},
+  morel:{c:[228,208,160],t:'dust',line:'A fine cream dust. No gills, so no pattern.'},
+  mycena:{c:[226,250,238],t:'gills',glow:[120,250,200],line:'White, with a faint green glow.'},
+  oyster:{c:[224,212,236],t:'fan',line:'Lilac-white, fanned out to one side.'},
+  turkey:{c:[234,226,196],t:'dust',line:'A pale dust shed from its pores.'},
+  hericium:{c:[242,240,232],t:'dust',line:'White dust, shaken loose from the spines.'},
+  lantern:{c:[255,130,205],t:'gills',glow:[255,96,190],line:'It glows on the paper. That shouldn\'t happen.'}
+};
+function drawPrint(c2,sp){withCtx(c2,()=>{
+  const P=PRINT[sp],bgc=P.paper?[214,208,192]:[14,20,18];ctx.clearRect(0,0,24,24);R(0,0,24,24,bgc);
+  const cx=12,cy=12,r=9,rng=mulberry(sp.length*977+sp.charCodeAt(0));
+  if(P.t==='gills'||P.t==='ridges'){const n=P.t==='ridges'?11:16;
+    for(let yy=-r;yy<=r;yy++)for(let xx=-r;xx<=r;xx++){const d2=xx*xx+yy*yy;if(d2<=r*r&&d2>4)R(cx+xx,cy+yy,1,1,P.c,0.1+0.08*rng());}
+    for(let i=0;i<n;i++){const a=i/n*Math.PI*2+0.13;for(let k=2;k<=r;k++)R(cx+Math.cos(a)*k,cy+Math.sin(a)*k,1,1,P.c,0.18+0.45*(k/r));
+      if(P.t==='ridges'){const a2=a+0.16;for(let k=6;k<=r;k++)R(cx+Math.cos(a2)*k,cy+Math.sin(a2)*k,1,1,P.c,0.5);}}
+    R(cx-1,cy-1,2,2,bgc);}
+  else if(P.t==='fan'){for(let i=0;i<17;i++){const a=-Math.PI/2+i/16*Math.PI/2;for(let k=2;k<=17;k++)R(4+Math.cos(a)*k,20+Math.sin(a)*k,1,1,P.c,0.25+0.55*(k/17));}}
+  else{for(let i=0;i<190;i++){const a=rng()*Math.PI*2,k=r*Math.sqrt(rng());R(cx+Math.cos(a)*k,cy+Math.sin(a)*k,1,1,P.c,0.25+0.6*rng()*(1-k/(r+2)));}}
+  if(P.glow){ctx.globalCompositeOperation='lighter';glow(cx,cy,11,P.glow,0.3);ctx.globalCompositeOperation='source-over';}
+});}
+
+/* ---------- colonies: spores that took, growing in their own time ---------- */
+const INCUB={amanita:30,chanterelle:40,inkcap:14,morel:36,mycena:20,oyster:18,turkey:30,hericium:36,lantern:24}; // hours under the moss
+const CHUNK=6*HOUR,WIND_BLOCK=8*HOUR;
+const WIND_POOL=['amanita','chanterelle','inkcap','morel','mycena','oyster','turkey','amanita','chanterelle','mycena','inkcap'];
+const colonyLife=c=>INCUB[c.sp]*HOUR+(c.src==='you'?5:4)*24*HOUR;
+function colonyState(c,now){
+  const age=now-c.born,inc=INCUB[c.sp]*HOUR;
+  if(age<0)return null;
+  if(age<inc)return{hidden:true,q:age/inc};
+  if(age>colonyLife(c))return 'gone';
+  const t=age-inc,k=Math.floor(t/CHUNK),ph=(t-k*CHUNK)/CHUNK;
+  // the first flush always comes; after that, wet weather makes flushes likelier
+  const p=k===0||c.sp==='lantern'?1:0.34+0.55*rainAround(c.born+inc+k*CHUNK);
+  if(hash(c.id*13.1+k*7.3)>=p)return null;
+  const st=cycleState(ph);if(!st)return null;
+  st.k=k;return st;
+}
+function safePlace(sp,r1,r2){
+  if(sp==='turkey'&&r2<0.5)return{a:'stump',side:r1<0.5?-1:1};
+  if(WOOD[sp])return{a:'log',f:0.1+r1*0.8};
+  const pos={a:'g',nx:0.08+r1*0.84,ny:0.14+r2*0.8};
+  for(let i=0;i<4;i++){const p=spotPos(pos);if(!inPond(p.x,p.y)&&!onLog(p.x,p.y))break;pos.nx=0.08+((pos.nx-0.08+0.29)%0.84);pos.ny=0.14+((pos.ny-0.14+0.37)%0.8);}
+  return pos;
+}
+function pruneColonies(){const now=Date.now(),n=state.colonies.length;state.colonies=state.colonies.filter(c=>colonyState(c,now)!=='gone');return n!==state.colonies.length;}
+function addColony(c){pruneColonies();if(state.colonies.length>=14)state.colonies.shift();c.id=c.id||Math.floor(Math.random()*1e9);state.colonies.push(c);save();}
+function windSow(){
+  const now=Date.now(),cur=Math.floor(now/WIND_BLOCK);let b=Math.max(Math.floor(state.lastWind/WIND_BLOCK),cur-9);
+  for(;b<cur;b++){if(hash(b*7.77+0.13)>=0.5)continue;
+    const t=b*WIND_BLOCK+hash(b*3.1)*WIND_BLOCK,wet=rainy(t)||rainy(t-RAIN_BLOCK);
+    let sp=WIND_POOL[Math.floor(hash(b*5.3)*WIND_POOL.length)];if(wet&&hash(b*9.1)<0.4)sp='hericium';
+    if(!state.colonies.some(c=>c.id===b))addColony(Object.assign({id:b,sp,born:t,src:'wind'},safePlace(sp,hash(b*2.2),hash(b*4.4))));}
+  state.lastWind=Math.max(state.lastWind,cur*WIND_BLOCK);pruneColonies();save();
+}
+function whereIs(c){if(c.a==='log')return'on the log';if(c.a==='stump')return'on the stump';if(c.ny<0.18&&c.nx<0.4)return'out by the cedars';return c.nx<0.36?'on the left side of the clearing':c.nx>0.64?'over on the right':'in the middle of the clearing';}
 
 function cycleState(p){
   if(p<0.12||p>=0.9)return null;
@@ -327,15 +426,6 @@ function cycleState(p){
   if(p<0.42){const q=(p-0.22)/0.2;return{g:0.3+0.7*(1-(1-q)*(1-q)),d:0,stage:'growing'};}
   if(p<0.78)return{g:1,d:0,stage:'mature'};
   return{g:1,d:(p-0.78)/0.12,stage:'decay'};
-}
-function plantedState(p,tMin){
-  const a=tMin-p.t0;
-  if(a<0)return null;
-  if(a<3)return{speck:true,g:0,d:0,stage:'spore'};
-  if(a<12){const q=(a-3)/9;return{g:0.12+0.88*q,d:0,stage:q<0.2?'pin':'growing'};}
-  if(a<55)return{g:1,d:0,stage:'mature'};
-  if(a<65)return{g:1,d:(a-55)/10,stage:'decay'};
-  return 'gone';
 }
 function spotPos(s){
   const {gy,gh,log,stump,pond}=G;
@@ -365,7 +455,8 @@ function critPos(c){
 }
 
 /* ---------- layout ---------- */
-let bgKey=-1,skyMask=new Uint8Array(1),showerAnnounced=false;
+let bgKey=-1,skyMask=new Uint8Array(1),showerAnnounced=false,lastHidden=[],wasRaining=null;
+const drops=[],taken=new Set();
 const meteors=[];
 const WISHES=['You make a wish. The grove keeps it to itself.','Wish made. The moss seems to approve.','You make a wish. Something past the cedars cheers.'];
 function spawnMeteor(sh){
@@ -396,11 +487,12 @@ function layout(){
 }
 
 /* ---------- static background (same grove every time) ---------- */
-function buildBG(L,warm){
+function buildBG(L,warm,wet){
   const t=L*0.7;
   const N={skyT:[8,12,34],skyB:[26,32,72],far:[20,24,48],mid:[11,13,22],mossF:[16,30,34],mossN:[28,58,40],mossH:[56,94,58],dark:[5,7,10],can:[9,22,21],canH:[20,42,33],bark:[50,37,30],barkD:[28,21,18],wood:[120,92,66],ring:[84,62,44],pond:[9,18,40],pondH:[80,100,150],strand:[30,52,40],pad:[24,52,34]};
   const D={skyT:[64,112,118],skyB:[150,186,150],far:[54,76,72],mid:[28,38,38],mossF:[40,72,52],mossN:[62,112,62],mossH:[112,162,84],dark:[12,18,18],can:[22,54,38],canH:[58,98,58],bark:[92,68,50],barkD:[52,38,30],wood:[176,140,100],ring:[130,98,70],pond:[30,64,74],pondH:[160,200,196],strand:[60,96,64],pad:[50,96,56]};
   const C={};for(const k in N)C[k]=mix(N[k],D[k],t);
+  const CLOUD=mix([30,34,46],[120,132,138],L);C.skyT=mix(C.skyT,CLOUD,wet*0.6);C.skyB=mix(C.skyB,CLOUD,wet*0.55);C.far=mix(C.far,CLOUD,wet*0.3);
   const img=bctx.createImageData(W,H),d=img.data;
   const P=(x,y,c)=>{x=Math.round(x);y=Math.round(y);if(x<0||y<0||x>=W||y>=H)return;const i=(y*W+x)*4;d[i]=c[0];d[i+1]=c[1];d[i+2]=c[2];d[i+3]=255;skyMask[y*W+x]=0;};
   const B=(x,y,c,a)=>{x=Math.round(x);y=Math.round(y);if(x<0||y<0||x>=W||y>=H)return;const i=(y*W+x)*4;d[i]+= (c[0]-d[i])*a;d[i+1]+=(c[1]-d[i+1])*a;d[i+2]+=(c[2]-d[i+2])*a;};
@@ -413,8 +505,8 @@ function buildBG(L,warm){
   for(let y=0;y<gy;y++){const q=(y/gy)*4,lo=Math.floor(q),fr=q-lo,hz=y/gy,wf=warm*0.62*hz*hz;const c0=mix(mix(C.skyT,C.skyB,lo/4),SUN,wf),c1=mix(mix(C.skyT,C.skyB,Math.min(1,(lo+1)/4)),SUN,wf);for(let x=0;x<W;x++){P(x,y,dith(c0,c1,fr,x,y));skyMask[y*W+x]=1;}}
   // stars + moon
   const rs=mulberry(101);
-  for(let i=0;i<60;i++){const x=rs()*W,y=rs()*gy*0.6,b=rs();if(L<0.5)B(x,y,[235,235,255],(0.35+b*0.6)*(1-L*2));}
-  const m=G.moon,ma=clamp(1-L*1.6,0,1);
+  for(let i=0;i<60;i++){const x=rs()*W,y=rs()*gy*0.6,b=rs();if(L<0.5&&wet<0.6)B(x,y,[235,235,255],(0.35+b*0.6)*(1-L*2)*(1-wet*1.6));}
+  const m=G.moon,ma=clamp(1-L*1.6,0,1)*clamp(1-wet*1.4,0,1);
   if(ma>0){for(let y=-6;y<=6;y++)for(let x=-6;x<=6;x++){if(x*x+y*y<=36)B(m.x+x,m.y+y,[236,232,206],ma);}B(m.x-2,m.y-1,[190,186,166],ma);B(m.x+1,m.y+2,[190,186,166],ma);B(m.x+2,m.y-3,[205,200,180],ma);}
   // far trunks
   const rf=mulberry(202);
@@ -516,10 +608,18 @@ function drawShroom(sp,x,y,g,d,v,side,lf,L){
       for(let k=0;k<2;k++){const r=Math.max(1,Math.round(5*s)-k*2);if(r<1)break;const yy=y-k*Math.max(2,r);
         for(let dy=-r;dy<=1;dy++)for(let dx=0;dx<=r;dx++){const dist=Math.sqrt(dx*dx+dy*dy);if(dist<=r)R(x+side*dx,yy+dy,1,1,bands[Math.floor(r-dist)%4]);}}
       break;}
+    case 'hericium':{const c=col([240,236,222]),sh=col([204,196,178]),w=Math.max(2,Math.round(8*s)),h=Math.max(1,Math.round(2*s)),top=y-6;
+      for(let r=0;r<h;r++){const rw=w-(r===0?2:0);R(x-Math.floor(rw/2),top+r,rw,1,c);}
+      for(let tier=0;tier<(s>0.7?2:1);tier++){const tw=w-tier*2,ty=top+h+tier*2;for(let i=0;i<tw;i++){const l=Math.max(1,Math.round((1.5+hash(i*3.7+tier)*2.5)*s));R(x-Math.floor(tw/2)+i,ty,1,l,(i+tier)%2?sh:c);}}
+      break;}
+    case 'lantern':{const sh=Math.max(1,Math.round(7*s)),stem=shade([214,196,224],0.85),cap=mix([255,100,192],BROWN,d);
+      R(x,y-sh,1,sh,stem);const cw=s>0.5?3:1;R(x-Math.floor(cw/2),y-sh-1,cw,1,cap);
+      if(s>0.6){R(x,y-sh-2,1,1,mix(cap,[255,255,255],0.35));R(x-2,y-sh,1,1,cap);R(x+2,y-sh,1,1,cap);}
+      break;}
   }
   ctx.globalAlpha=1;
 }
-function capTop(sp,g,v){const s=g*v;switch(sp){case 'amanita':return Math.round(6*s)+Math.round(4.5*s);case 'chanterelle':return Math.round(4*s)+Math.round(3*s);case 'inkcap':return Math.round(4*s)+Math.round(8*s);case 'morel':return Math.round(3*s)+Math.round(8*s);case 'mycena':return Math.round(7*s)+1;case 'oyster':return Math.round(6*s)+2;default:return Math.round(5*s);}}
+function capTop(sp,g,v){const s=g*v;switch(sp){case 'amanita':return Math.round(6*s)+Math.round(4.5*s);case 'chanterelle':return Math.round(4*s)+Math.round(3*s);case 'inkcap':return Math.round(4*s)+Math.round(8*s);case 'morel':return Math.round(3*s)+Math.round(8*s);case 'mycena':return Math.round(7*s)+1;case 'oyster':return Math.round(6*s)+2;case 'hericium':return 6;case 'lantern':return Math.round(7*s)+2;default:return Math.round(5*s);}}
 
 /* ---------- particles & effects ---------- */
 const spores=[],pulses=[],ripples=[],flashes={};
@@ -528,7 +628,7 @@ function emitSpores(x,y,n,c){for(let i=0;i<n;i++){if(spores.length>220)spores.sh
 
 /* ---------- audio ---------- */
 const BPM=112,BEAT=60/BPM,STEP=BEAT/4;
-let actx=null,master,beatBus,beatFilter,beatGain,revIn,noiseBuf,audioOn=false,beatStart=0,nextStep=0,nextTime=0,schedTimer=null;
+let actx=null,master,beatBus,beatFilter,beatGain,rainGain,revIn,noiseBuf,audioOn=false,beatStart=0,nextStep=0,nextTime=0,schedTimer=null;
 const visT0=performance.now()/1000;
 const mtof=m=>440*Math.pow(2,(m-69)/12);
 function env(g,t,a,peak,dec){g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(peak,t+a);g.gain.exponentialRampToValueAtTime(0.0001,t+a+dec);}
@@ -548,6 +648,9 @@ function initAudio(){
   const wl=actx.sampleRate*4,wb=actx.createBuffer(1,wl,actx.sampleRate),wd=wb.getChannelData(0);let lastB=0;for(let i=0;i<wl;i++){lastB=(lastB+0.02*(Math.random()*2-1))/1.02;wd[i]=lastB*3.5;}
   const ws=actx.createBufferSource();ws.buffer=wb;ws.loop=true;const wf=actx.createBiquadFilter();wf.type='lowpass';wf.frequency.value=520;const wg=actx.createGain();wg.gain.value=0.12;
   const lfo=actx.createOscillator();lfo.frequency.value=0.06;const lg=actx.createGain();lg.gain.value=0.06;lfo.connect(lg);lg.connect(wg.gain);ws.connect(wf);wf.connect(wg);wg.connect(master);ws.start();lfo.start();
+  // rain on leaves
+  const rs=actx.createBufferSource();rs.buffer=noiseBuf;rs.loop=true;rs.loopEnd=1.7;const rf=actx.createBiquadFilter();rf.type='bandpass';rf.frequency.value=2200;rf.Q.value=0.35;
+  rainGain=actx.createGain();rainGain.gain.value=0.0001;rs.connect(rf);rf.connect(rainGain);rainGain.connect(master);rs.start();
   // grove drone
   const dg=actx.createGain();dg.gain.value=0.018;const trem=actx.createOscillator();trem.frequency.value=0.09;const tg=actx.createGain();tg.gain.value=0.009;trem.connect(tg);tg.connect(dg.gain);trem.start();
   for(const m of [45,52,57]){const o=actx.createOscillator();o.type='sine';o.frequency.value=mtof(m);o.detune.value=(Math.random()-0.5)*8;o.connect(dg);o.start();}
@@ -561,6 +664,7 @@ function schedule(){
   if(!actx||actx.state!=='running')return;
   while(nextTime<actx.currentTime+0.12){playStep(nextStep,nextTime);nextTime+=STEP;nextStep++;}
   beatGain.gain.setTargetAtTime(0.0001+0.6*beatLevel(lightLevel()),actx.currentTime,1.5);
+  rainGain.gain.setTargetAtTime(0.0001+0.2*sky().rain,actx.currentTime,2);
   beatFilter.frequency.setTargetAtTime(Date.now()<leanUntil?2600:420,actx.currentTime,Date.now()<leanUntil?0.5:1.6);
 }
 function playStep(step,t){
@@ -601,21 +705,29 @@ const PARTY=[[255,95,191],[80,226,255],[255,180,80],[170,120,255]];
 /* ---------- messages ---------- */
 let logTimer;
 function say(msg,ms){logEl.textContent=msg;logEl.style.opacity='1';clearTimeout(logTimer);logTimer=setTimeout(()=>{logEl.style.opacity='0';},ms||6500);}
-function fruitedBetween(aMs,bMs){const a=aMs/60000,b=bMs/60000;let n=0;for(const s of SPOTS){const P=s.period,f=t=>Math.floor((t+s.off-0.42*P)/P);n+=Math.max(0,f(b)-f(a));}for(const p of state.planted){const m=p.t0+12;if(m>a&&m<=b)n++;}return n;}
-function awayLine(sinceMs){const gone=Date.now()-sinceMs,n=fruitedBetween(sinceMs,Date.now());const night=gone>6*3600e3?' A whole night passed out here.':'';return n===0?'The hollow kept quiet while you were gone.'+night:`While you were away, ${n} mushroom${n>1?'s':''} fruited.`+night;}
+function fruitedBetween(aMs,bMs){const a=aMs/60000,b=bMs/60000;let n=0;for(const s of SPOTS){const P=s.period,f=t=>Math.floor((t+s.off-0.42*P)/P);n+=Math.max(0,f(b)-f(a));}return n;}
+function awayLine(sinceMs){
+  const now=Date.now(),n=fruitedBetween(sinceMs,now);
+  let rained=false;for(let t=sinceMs;t<now;t+=RAIN_BLOCK/2)if(rainy(t)){rained=true;break;}
+  const what=n===0?'':n===1?'a mushroom fruited':n<=12?`${n} mushrooms fruited`:n<=40?'dozens of mushrooms came and went':'more mushrooms than you could count came and went';
+  let s=rained?(n?`Rain came through while you were away, and ${what}.`:'Rain came through while you were away.'):(n?`While you were away, ${what}.`:'The hollow kept quiet while you were gone.');
+  const fresh=state.colonies.filter(c=>{const f=c.born+INCUB[c.sp]*HOUR;return f>sinceMs&&f<=now;});
+  if(fresh.length)s+=` Something new has come up ${whereIs(fresh[fresh.length-1])}.`;
+  return s;
+}
 
 /* ---------- main loop ---------- */
 let lastList=[],lastFrame=performance.now(),lastLvl=0.5,swellCool=0;
 function frame(now){
   const tS=now/1000,dt=Math.min(0.05,(now-lastFrame)/1000);lastFrame=now;
-  const L=lightLevel(),warm=warmth(),key=Math.round(L*20)*20+Math.round(warm*10);
-  if(key!==bgKey){buildBG(L,warm);bgKey=key;}
+  const wet=sky().rain,L=lightLevel(),warm=warmth(),key=Math.round(L*20)*200+Math.round(warm*10)*10+Math.round(wet*5);
+  if(key!==bgKey){buildBG(L,warm,wet);bgKey=key;}
   ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
   ctx.drawImage(bg,0,0);
 
   // shooting stars, only where real sky shows through the trees
   const sk=sky();
-  if(L<0.12&&!document.hidden){const rate=1/300+(sk.sh?sk.sh.i/25:0);if(Math.random()<dt*rate&&meteors.length<3)spawnMeteor(sk.sh);}
+  if(L<0.12&&sk.rain<0.1&&!document.hidden){const rate=1/300+(sk.sh?sk.sh.i/25:0);if(Math.random()<dt*rate&&meteors.length<3)spawnMeteor(sk.sh);}
   if(meteors.length){ctx.globalCompositeOperation='lighter';
     for(let i=meteors.length-1;i>=0;i--){const m=meteors[i];m.age+=dt;if(m.age>m.life+0.6){meteors.splice(i,1);continue;}if(m.age>m.life)continue;
       const hx=m.x+m.vx*m.age,hy=m.y+m.vy*m.age,fade=Math.sin(Math.PI*m.age/m.life),sp=Math.hypot(m.vx,m.vy),ux=m.vx/sp,uy=m.vy/sp;
@@ -641,8 +753,14 @@ function frame(now){
   // mushrooms
   const tMin=Date.now()/60000,lf=0.62+0.38*L,list=[];
   for(const s of SPOTS){const P=s.period,x=(tMin+s.off)/P,k=Math.floor(x),st=cycleState(x-k);if(!st)continue;const pos=spotPos(s);list.push({key:s.key,sp:s.sp,x:pos.x,y:pos.y,g:st.g,d:st.d,stage:st.stage,v:0.85+0.3*hash(s.id*131+k),side:s.side||1});}
-  state.planted=state.planted.filter(p=>plantedState(p,tMin)!=='gone');
-  for(const p of state.planted){const st=plantedState(p,tMin);if(!st)continue;list.push({key:'p'+p.t0,sp:p.sp,x:Math.round(p.nx*W),y:Math.round(gy+p.ny*gh),g:st.g,d:st.d,stage:st.stage,v:1,side:1,speck:st.speck});}
+  const nowMs=Date.now(),hidden=[];
+  for(const c of state.colonies){const st=colonyState(c,nowMs);if(!st||st==='gone')continue;const pos=spotPos(c);
+    if(st.hidden){hidden.push({c,x:pos.x,y:pos.y,q:st.q});continue;}
+    if(c.sp==='lantern'&&L>0.35)continue; // only shows itself after dark
+    const base={sp:c.sp,g:st.g,d:st.d,stage:st.stage,side:c.side||1};
+    list.push(Object.assign({key:'c'+c.id+'_'+st.k,x:pos.x,y:pos.y,v:0.9+0.25*hash(c.id+st.k)},base));
+    if(c.a==='g'&&hash(c.id*3.3+st.k)>0.4)list.push(Object.assign({key:'c'+c.id+'_'+st.k+'b',x:pos.x+(hash(c.id)>0.5?4:-4),y:pos.y+1,v:0.7},base,{g:st.g*0.85}));}
+  lastHidden=hidden;
   list.sort((a,b)=>a.y-b.y);
   for(const m of list){if(m.speck)continue;drawShroom(m.sp,m.x,m.y,m.g,m.d,m.v,m.side,lf,L);m.top=m.y-capTop(m.sp,m.g,m.v);
     if(m.stage==='mature'&&Math.random()<dt*0.22)emitSpores(m.x,m.top,1,m.sp==='mycena'?[140,248,208]:null);}
@@ -680,9 +798,14 @@ function frame(now){
   for(const m of list){
     if(m.speck){glow(m.x,m.y-1,4,[150,255,215],0.35+0.15*Math.sin(tS*3));R(m.x,m.y-1,1,1,[200,255,230],0.8);continue;}
     if(m.sp==='mycena'){glow(m.x,m.y-4,9*m.g*m.v,[120,250,200],(0.42+0.08*Math.sin(tS*1.3+m.x))*(1-L*0.75)*(1-m.d));}
+    if(m.sp==='lantern'){glow(m.x,m.y-6,11*m.g,[255,96,190],(0.22+0.5*e*Math.max(lvl,0.3))*(1-m.d));}
     const f=flashes[m.key];if(f&&tS-f<1.4){const a=1-(tS-f)/1.4;glow(m.x,(m.top||m.y)-2,11,[220,255,230],0.4*a);}
   }
   for(const c of CRIT){if(c._eyes&&tS>=c.hide){const s=SPR[c.spr];for(const [ex,ey] of s.eyes)glow(c._eyes[0]+ex+0.5,c._eyes[1]+ey+0.5,2.5,c.eye,0.35);}}
+  // mycelium spreading unseen under the moss, faintly visible after dark
+  for(const h of hidden){const a0=(0.06+0.22*h.q)*(1-L*0.85)*(0.8+0.2*Math.sin(tS*0.7+h.c.id));if(a0<0.02)continue;
+    for(let i=0;i<7;i++){const an=hash(h.c.id*1.3+i)*Math.PI*2,len=2+h.q*10*(0.5+hash(h.c.id+i*7.1));
+      for(let k=1;k<len;k++){const wob=Math.sin(k*0.9+i)*0.6;R(h.x+Math.cos(an)*k+wob,h.y+Math.sin(an)*k*0.45,1,1,[150,235,200],a0*(1-k/len));}}}
 
   // mycelium pulses
   for(let i=pulses.length-1;i>=0;i--){const p=pulses[i],el=tS-p.t0,n=p.s.length,head=Math.min(n,el/p.dur*n),fade=el>p.dur?1-(el-p.dur)/0.9:1;
@@ -695,28 +818,36 @@ function frame(now){
   for(let i=spores.length-1;i>=0;i--){const s=spores[i];s.vx+=Math.sin(tS*1.5+s.ph)*dt*3;s.vy+=dt*0.8;s.vx*=Math.pow(0.5,dt);s.vy*=Math.pow(0.6,dt);s.x+=s.vx*dt;s.y+=s.vy*dt;s.life-=dt*s.dec;if(s.life<=0||s.y<0){spores.splice(i,1);continue;}R(s.x,s.y,1,1,s.c,0.75*s.life);}
 
   // fireflies
-  const ffCount=Math.round(5+11*(1-L));
+  const ffCount=Math.round((5+11*(1-L))*(1-0.8*sk.rain));
   for(let i=0;i<fireflies.length;i++){const f=fireflies[i];const acc=reduce?3:8;f.vx+=(Math.random()-0.5)*dt*acc*2;f.vy+=(Math.random()-0.5)*dt*acc*2;
     if(attract&&tS<attract.until){f.vx+=(attract.x-f.x)*dt*0.5;f.vy+=(attract.y-f.y)*dt*0.5;}
     const damp=Math.pow(0.35,dt);f.vx*=damp;f.vy*=damp;const mx=attract&&tS<attract.until?18:9;f.vx=clamp(f.vx,-mx,mx);f.vy=clamp(f.vy,-mx,mx);
     f.x+=f.vx*dt;f.y+=f.vy*dt;if(f.x<6||f.x>W-6)f.vx*=-1;if(f.y<H*0.18||f.y>H-4)f.vy*=-1;f.x=clamp(f.x,4,W-4);f.y=clamp(f.y,H*0.17,H-3);
     if(i>=ffCount)continue;const b=Math.pow(Math.max(0,Math.sin(tS*f.sp+f.ph)),5);if(b>0.03){glow(f.x,f.y,4,[210,255,120],0.45*b);R(f.x,f.y,1,1,[240,255,180],b);}}
 
-  // moths around the ghost mycena
-  if(L<0.5){const glowing=list.filter(m=>m.sp==='mycena'&&m.g>0.5);const anchor=glowing[0]||{x:pond.cx,y:pond.cy-2};for(let k=0;k<2;k++){const a=tS*(1.7+k*0.6)+k*3,x=anchor.x+Math.cos(a)*(6+k*3),y=anchor.y-9-k*3+Math.sin(a*1.3)*3,flap=Math.sin(tS*28+k)>0;ctx.globalCompositeOperation='source-over';R(x,y,1,1,[206,196,176]);if(flap){R(x-1,y,1,1,[170,160,144]);R(x+1,y,1,1,[170,160,144]);}else R(x,y-1,1,1,[170,160,144]);}}
+  // rain
+  ctx.globalCompositeOperation='source-over';
+  const want=Math.round(sk.rain*150);
+  if(want>0){const rc=mix([120,140,190],[200,214,232],L);while(drops.length<want)drops.push({x:Math.random()*(W+30),y:Math.random()*H,s:0.7+Math.random()*0.6});
+    for(let i=0;i<want;i++){const d=drops[i];d.y+=dt*190*d.s;d.x-=dt*38*d.s;if(d.y>H||d.x<-2){d.y=-Math.random()*30;d.x=Math.random()*(W+30);}
+      R(d.x,d.y,1,1,rc,0.48);R(d.x+0.3,d.y-1,1,1,rc,0.32);R(d.x+0.6,d.y-2,1,1,rc,0.16);}
+    if(Math.random()<dt*sk.rain*5)ripples.push({x:pond.cx+(Math.random()*2-1)*pond.rx*0.7,y:pond.cy+(Math.random()*2-1)*pond.ry*0.5,r:0.5,life:0.7});}
+  // moths around the ghost mycena (they stay in when it rains)
+  if(L<0.5&&sk.rain<0.2){const glowing=list.filter(m=>m.sp==='mycena'&&m.g>0.5);const anchor=glowing[0]||{x:pond.cx,y:pond.cy-2};for(let k=0;k<2;k++){const a=tS*(1.7+k*0.6)+k*3,x=anchor.x+Math.cos(a)*(6+k*3),y=anchor.y-9-k*3+Math.sin(a*1.3)*3,flap=Math.sin(tS*28+k)>0;ctx.globalCompositeOperation='source-over';R(x,y,1,1,[206,196,176]);if(flap){R(x-1,y,1,1,[170,160,144]);R(x+1,y,1,1,[170,160,144]);}else R(x,y-1,1,1,[170,160,144]);}}
   ctx.globalCompositeOperation='source-over';
 
   // ambient storytelling
   if(lvl>0.82&&lastLvl<=0.82&&tS>swellCool&&entered){say('The music past the cedars swells.');swellCool=tS+180;}
   if(lvl<0.14&&lastLvl>=0.14&&tS>swellCool&&entered){say('The beat beyond the trees fades to a heartbeat.');swellCool=tS+180;}
   lastLvl=lvl;
+  if(entered){const raining=sk.rain>0.25;if(raining!==wasRaining){if(wasRaining!==null)say(raining?'Rain moves in. The moss drinks it up.':'The rain eases off. Everything smells like earth.');if(raining)note('rain');wasRaining=raining;}}
   if(entered&&!showerAnnounced&&L<0.12){showerAnnounced=true;if(sk.sh&&sk.sh.i>0.25){const nm=sk.sh.name;setTimeout(()=>say(`The ${nm} are falling tonight. Keep an eye on the sky.`,8000),10000);}}
 
   requestAnimationFrame(frame);
 }
 
 /* ---------- status ---------- */
-function updateStatus(){const s=sky(),n=lastList.filter(m=>m.stage==='mature').length;const phase=s.alt>=6?'Day':s.alt>=-6?(s.rising?'Dawn':'Dusk'):'Night';statusEl.textContent=`${phase} · ${n} fruiting`;}
+function updateStatus(){const s=sky(),n=lastList.filter(m=>m.stage==='mature').length;const phase=s.alt>=6?'Day':s.alt>=-6?(s.rising?'Dawn':'Dusk'):'Night';statusEl.textContent=`${phase}${s.rain>0.25?' · Rain':''} · ${n} fruiting`;}
 setInterval(updateStatus,2000);
 
 /* ---------- ambient events ---------- */
@@ -725,7 +856,7 @@ let flavorAt=performance.now()/1000+70;
 setInterval(()=>{
   if(!entered||document.hidden)return;
   const L=lightLevel(),tS=performance.now()/1000;
-  if(L<0.5&&Math.random()<0.35)crickets();
+  if(L<0.5&&sky().rain<0.2&&Math.random()<0.35)crickets();
   if(L<0.5&&Math.random()<0.012)owl();
   if(Math.random()<0.02){frogCroak=tS+0.5;croakSound((G.pond.cx/W)*2-1);ripples.push({x:G.pond.cx-G.pond.rx+3,y:G.pond.cy,r:1,life:1});}
   if(tS>flavorAt){say(FLAVOR[Math.floor(Math.random()*FLAVOR.length)]);flavorAt=tS+80+Math.random()*90;}
@@ -758,19 +889,57 @@ cv.addEventListener('pointerdown',ev=>{
   const p=G.party;if(Math.abs(x-p.x)<24&&y<p.y+10&&y>p.y-60){leanUntil=Date.now()+10000;say('You lean toward the music. It leans back.');note('dancers');return;}
   // mushrooms
   let best=null,bd=10;for(const m of lastList){if(m.speck)continue;const cy=((m.top||m.y)+m.y)/2,dd=Math.hypot(m.x-x,cy-y);if(dd<bd){bd=dd;best=m;}}
-  if(best){const nm=NAMES[best.sp];flashes[best.key]=tS;emitSpores(best.x,best.top||best.y,best.stage==='mature'?16:5,best.sp==='mycena'?[140,248,208]:null);chime(PENTA[NOTE[best.sp]],pan,0.1);puff(pan);
+  if(best){const nm=NAMES[best.sp];flashes[best.key]=tS;emitSpores(best.x,best.top||best.y,best.stage==='mature'?16:5,PRINT[best.sp].glow||null);chime(PENTA[NOTE[best.sp]],pan,0.1);puff(pan);
+    if(best.stage==='mature'&&!taken.has(best.key)){taken.add(best.key);takePrint(best.sp,note(best.sp,true));return;}
     const lines={pin:`A ${nm} pin, barely awake.`,growing:`The ${nm} is still growing.`,mature:`The ${nm} lets go of its spores.`,decay:`The ${nm} is giving itself back to the moss.`};say(lines[best.stage]||nm);note(best.sp);return;}
   // pond
-  if(inPond(x,y)){ripples.push({x,y,r:1,life:1});plop(pan);say('Rings cross the pond.');return;}
+  if(inPond(x,y)){ripples.push({x,y,r:1,life:1});plop(pan);
+    if(state.held){say(`The ${NAMES[state.held]} spores float off across the water.`);state.held=null;save();updateHeld();}else say('Rings cross the pond.');return;}
+  // log & stump
+  const onStump=Math.abs(x-G.stump.x)<9&&y>G.stump.y-G.stump.h-3&&y<G.stump.y+2;
+  if(state.held&&(onLog(x,y)||onStump)){const sp=state.held;
+    if(WOOD[sp])scatter(sp,onStump?{a:'stump',side:x<G.stump.x?-1:1}:{a:'log',f:clamp((x-G.log.x0)/(G.log.x1-G.log.x0),0.08,0.92)},x,y);
+    else say(`${capFirst(NAMES[sp])} spores won't take on bare wood. Try the moss.`);return;}
   // moss
-  if(y>G.gy+5&&!onLog(x,y)){const hit=addPulse(x,y);
-    const near=state.planted.some(q=>Math.hypot(q.nx*W-x,(G.gy+q.ny*G.gh)-y)<10);
-    if(!near){const nearPond=Math.hypot((x-G.pond.cx)/(G.pond.rx+16),(y-G.pond.cy)/(G.pond.ry+12))<1;const opts=['amanita','chanterelle','inkcap','morel'];const sp=nearPond?'mycena':opts[Math.floor(Math.random()*opts.length)];
-      state.planted.push({nx:x/W,ny:(y-G.gy)/G.gh,sp,t0:Date.now()/60000});if(state.planted.length>10)state.planted.shift();save();}
+  if(y>G.gy+5&&!onLog(x,y)){
+    if(state.held){const sp=state.held;
+      if(WOOD[sp]){say(`${capFirst(NAMES[sp])} spores want wood, not moss. Try the log${sp==='turkey'?' or the stump':''}.`);return;}
+      const treeline=y<G.gy+G.gh*0.16&&x<W*0.38;
+      scatter(treeline?'lantern':sp,{a:'g',nx:x/W,ny:(y-G.gy)/G.gh},x,y,treeline&&sp!=='lantern');return;}
+    const hit=addPulse(x,y),under=lastHidden.find(o=>Math.hypot(o.x-x,o.y-y)<12);
     chime(PENTA[Math.floor(Math.random()*3)],pan,0.05);
-    say(near?(hit?'The network hums under the moss.':'The moss is quiet here.'):'A spore settles into the moss. Check back in a few minutes.');return;}
+    say(under?'Something is spreading under the moss here.':hit?'The network hums under the moss.':'The moss is quiet here.');return;}
   // sky / canopy
   attract={x,y,until:tS+6};chime(PENTA[5+Math.floor(Math.random()*2)]+12,pan,0.04);say('The fireflies drift closer.');note('fireflies');
+});
+
+/* ---------- prints you carry ---------- */
+const heldBtn=document.getElementById('held'),heldC=document.getElementById('heldc'),heldT=document.getElementById('heldt');
+function updateHeld(){
+  if(!state.held){heldBtn.hidden=true;return;}
+  drawPrint(heldC.getContext('2d'),state.held);
+  heldT.textContent='';heldT.append(`${capFirst(NAMES[state.held])} print`);const s=document.createElement('small');s.textContent='Tap to let it go';heldT.append(s);
+  heldBtn.hidden=false;
+}
+function takePrint(sp,fresh){
+  const e=state.prints[sp],isNew=!e;
+  state.prints[sp]={first:e?e.first:Date.now(),count:(e?e.count:0)+1};state.held=sp;save();updateHeld();
+  [0,2,4].forEach((k,i)=>setTimeout(()=>chime(PENTA[k],0,0.05),i*110));
+  let msg=`You take a spore print from the ${NAMES[sp]}. ${PRINT[sp].line}`;
+  if(!state.tips){state.tips=1;save();msg+=' Scatter it on the moss, or let the wind have it.';}
+  else if(isNew||fresh)msg+=' New in your journal.';
+  if(isNew)jBtn.classList.add('new');
+  say(msg,9000);
+}
+function scatter(sp,pos,x,y,changed){
+  addColony(Object.assign({sp,born:Date.now(),src:'you'},pos));state.held=null;save();updateHeld();
+  emitSpores(x,y,20,PRINT[sp].glow||PRINT[sp].c);chime(PENTA[1],(x/W)*2-1,0.06);
+  say(changed?'The spores drift toward the music and don\'t come back down.':`You scatter the ${NAMES[sp]} spores. Nothing happens, yet.`,7000);
+}
+heldBtn.addEventListener('click',()=>{
+  const sp=state.held;if(!sp)return;state.held=null;
+  addColony(Object.assign({sp,born:Date.now()+(1+Math.random()*5)*HOUR,src:'wind'},sp==='lantern'?{a:'g',nx:0.1+Math.random()*0.25,ny:0.03+Math.random()*0.1}:safePlace(sp,Math.random(),Math.random())));
+  updateHeld();say('You let the wind take it. It\'ll land somewhere.');
 });
 
 /* ---------- journal panel ---------- */
@@ -783,6 +952,8 @@ function drawSighting(id){
   if(id==='folk'){const s=SPR.ears,x0=10,y0=10;s.rows.forEach((row,j)=>{for(let i=0;i<row.length;i++)if(row[i]==='X')R(x0+i,y0+j,1,1,body);});for(const [ex,ey] of s.eyes)R(x0+ex,y0+ey,1,1,[255,211,107]);}
   if(id==='dancers'){ctx.globalCompositeOperation='lighter';glow(12,12,14,[255,95,191],0.5);ctx.globalCompositeOperation='source-over';for(let i=0;i<5;i++){const x=4+i*4,y=17-(i%2);R(x,y-3,1,3,[4,4,8]);R(x,y-4,1,1,[4,4,8]);}}
   if(id==='meteor'){for(const [x,y] of [[3,15],[20,3],[8,4],[21,16]])R(x,y,1,1,[200,210,240]);ctx.globalCompositeOperation='lighter';for(let k=0;k<13;k++)R(18-k,13-Math.round(k*0.6),1,1,k<2?[255,255,236]:[190,212,255],1-k/13);glow(18,13,3,[255,255,236],0.5);ctx.globalCompositeOperation='source-over';}
+  if(id==='rain'){for(let y=15;y<20;y++)R(3+(y===15||y===19?2:0),y,18-(y===15||y===19?4:0),1,[9,18,40]);R(9,17,6,1,[120,150,200]);
+    for(const [x,y] of [[4,2],[10,5],[16,1],[20,7],[7,10],[14,9],[19,12],[3,8],[12,1]]){R(x,y,1,1,[170,190,225]);R(x+1,y-1,1,1,[170,190,225],0.6);}}
   if(id==='fireflies'){ctx.globalCompositeOperation='lighter';for(const [x,y] of [[6,7],[15,5],[11,13],[19,12]]){glow(x,y,4,[210,255,120],0.5);R(x,y,1,1,[240,255,180]);}}
   ctx.globalCompositeOperation='source-over';
 }
@@ -792,7 +963,10 @@ function sketch(j,known){
     if(j.kind==='shroom'){
       if(j.id==='oyster'){R(0,15,24,5,[50,37,30]);R(0,15,24,1,[56,94,58]);drawShroom('oyster',12,17,1,0,1,1,1,0);}
       else if(j.id==='turkey'){R(4,6,9,14,[50,37,30]);R(4,6,9,1,[120,92,66]);drawShroom('turkey',13,14,1,0,1,1,1,0);}
-      else{R(0,17,24,3,[28,58,40]);R(0,17,24,1,[56,94,58]);drawShroom(j.id,12,17,1,0,1,1,1,0);if(j.id==='mycena'&&known){ctx.globalCompositeOperation='lighter';glow(12,12,9,[120,250,200],0.35);ctx.globalCompositeOperation='source-over';}}
+      else if(j.id==='hericium'){R(0,10,24,10,[50,37,30]);R(0,10,24,1,[56,94,58]);for(let x=2;x<24;x+=5)R(x,14+(x%3),3,1,[28,21,18]);drawShroom('hericium',12,18,1,0,1,1,1,0);}
+      else{R(0,17,24,3,[28,58,40]);R(0,17,24,1,[56,94,58]);drawShroom(j.id,12,17,1,0,1,1,1,0);
+        const gl=j.id==='mycena'?[[120,250,200],12]:j.id==='lantern'?[[255,96,190],10]:null;
+        if(gl&&known){ctx.globalCompositeOperation='lighter';glow(12,gl[1],9,gl[0],0.35);ctx.globalCompositeOperation='source-over';}}
     }else drawSighting(j.id);
     if(!known){ctx.globalCompositeOperation='source-in';ctx.fillStyle='#26302a';ctx.fillRect(0,0,24,20);ctx.globalCompositeOperation='source-over';}
   });
@@ -801,8 +975,17 @@ function sketch(j,known){
 const fmtDate=ms=>new Date(ms).toLocaleDateString(undefined,{month:'short',day:'numeric'});
 function renderJournal(){
   jList.textContent='';
-  const known=JOURNAL.filter(j=>state.journal[j.id]).length;
-  jCount.textContent=`${known} of ${JOURNAL.length} noted`;
+  const known=JOURNAL.filter(j=>state.journal[j.id]).length,shrooms=JOURNAL.filter(j=>j.kind==='shroom'),pn=shrooms.filter(j=>state.prints[j.id]).length;
+  jCount.textContent=`${known} of ${JOURNAL.length} noted · ${pn} of ${shrooms.length} prints`;
+  // spore prints: the collection
+  const ph=document.createElement('h3');ph.className='jsec';ph.textContent='Spore prints';jList.appendChild(ph);
+  const pp=document.createElement('p');pp.className='jhint';pp.textContent=pn===shrooms.length?'Every print the hollow has to give. It keeps growing without you, as it always did.':'Take a print by tapping a mushroom in its prime.';jList.appendChild(pp);
+  const grid=document.createElement('div');grid.className='pgrid';
+  for(const j of shrooms){const p=state.prints[j.id],cell=document.createElement('figure');cell.className='pcell'+(p?'':' locked');
+    const c=document.createElement('canvas');c.width=24;c.height=24;c.className='pprint';if(p)drawPrint(c.getContext('2d'),j.id);cell.appendChild(c);
+    const fc=document.createElement('figcaption');fc.textContent=p?j.name:'Not yet taken';if(p){const s=document.createElement('small');s.textContent=`× ${p.count}`;fc.append(s);}
+    cell.appendChild(fc);grid.appendChild(cell);}
+  jList.appendChild(grid);
   for(const [kind,label] of [['shroom','Mushrooms'],['sight','Sightings']]){
     const h=document.createElement('h3');h.className='jsec';h.textContent=label;jList.appendChild(h);
     for(const j of JOURNAL.filter(e=>e.kind===kind)){
@@ -842,13 +1025,16 @@ sndBtn.addEventListener('click',()=>setSound(!audioOn));
 let hiddenAt=0;
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden){hiddenAt=Date.now();save();if(actx)actx.suspend();}
-  else{if(actx&&audioOn)actx.resume();try{navigator.wakeLock&&entered&&navigator.wakeLock.request('screen').catch(()=>{});}catch(e){}if(entered&&hiddenAt&&Date.now()-hiddenAt>5*60000)say(awayLine(hiddenAt),8000);}
+  else{windSow();if(actx&&audioOn)actx.resume();try{navigator.wakeLock&&entered&&navigator.wakeLock.request('screen').catch(()=>{});}catch(e){}if(entered&&hiddenAt&&Date.now()-hiddenAt>5*60000)say(awayLine(hiddenAt),8000);}
 });
 setInterval(save,30000);
 addEventListener('pagehide',save);
 addEventListener('resize',layout);
 
 layout();
+windSow();
+updateHeld();
+setInterval(windSow,60000);
 updateStatus();
 requestAnimationFrame(t=>{lastFrame=t;frame(t);});
 })();
