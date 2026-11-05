@@ -324,7 +324,7 @@ state.colonies=Array.isArray(state.colonies)?state.colonies:[];
 state.prints=state.prints&&typeof state.prints==='object'?state.prints:{};
 state.held=typeof state.held==='string'?state.held:null;
 state.lastWind=state.lastWind||Date.now();
-function save(){try{localStorage.setItem(KEY,JSON.stringify({first:state.first,last:Date.now(),journal:state.journal,colonies:state.colonies,prints:state.prints,held:state.held,lastWind:state.lastWind,tips:state.tips}));}catch(e){}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify({first:state.first,last:Date.now(),journal:state.journal,colonies:state.colonies,prints:state.prints,held:state.held,lastWind:state.lastWind,tips:state.tips,turnTip:state.turnTip}));}catch(e){}}
 
 /* ---------- field journal ---------- */
 const JOURNAL=[
@@ -899,11 +899,19 @@ function above(now,tS,dt){
   if(entered&&!showerAnnounced&&L<0.12){showerAnnounced=true;if(sk.sh&&sk.sh.i>0.25){const nm=sk.sh.name;setTimeout(()=>say(`The ${nm} are falling tonight. Keep an eye on the sky.`,8000),10000);}}
 }
 
-/* ---------- below the moss ---------- */
+/* ---------- below the moss: a block of soil you can turn ---------- */
 const belowBg=document.createElement('canvas'),netLayer=document.createElement('canvas');
-let belowMask=new Uint8Array(1),netCache=new Map(),netKey='',NETS=[],belowFlash=null,prevKick=0,wormT=Math.random()*200;
-const sparks=[],dust=[],drips=[],GS={x:0,y:0};
+let belowMask=new Uint8Array(1),netCache=new Map(),netKey='',NETS=[],belowFlash=null,prevKick=0;
+const sparks=[],dust=[],drips=[],GS={x:0,y:0},CEDAR_ROOTS=[],TRUNK3=[];
 const TRUNKS=[0.31,0.55,0.76];
+let rotY=0,rotShown=0; // how far the block is turned (radians): the target, and the eased value drawn
+const DEPTH=()=>W*0.7;
+// a point in the soil block, seen from the current angle
+function projX(x,z){return W/2+(x-W/2)*Math.cos(rotShown)+z*Math.sin(rotShown);}
+function projD(x,z){return clamp((-(x-W/2)*Math.sin(rotShown)+z*Math.cos(rotShown))/DEPTH()+0.5,0,1);} // 0 back, 1 front
+// how near the front of the clearing a mushroom stands: 0 = back, 1 = front
+function netDepth(s){const p=spotPos(s);return clamp((p.y-G.gy)/G.gh,0,1);}
+const zOf=s=>(netDepth(s)-0.5)*DEPTH();
 function bakeBelow(){
   belowBg.width=W;belowBg.height=H;netLayer.width=W;netLayer.height=H;belowMask=new Uint8Array(W*H);netCache=new Map();netKey='';
   const surf=G.surf,b=belowBg.getContext('2d'),img=b.createImageData(W,H),d=img.data;
@@ -919,89 +927,99 @@ function bakeBelow(){
     for(let y=-ry;y<=ry;y++)for(let x=-rx;x<=rx;x++)if((x*x)/(rx*rx+0.1)+(y*y)/(ry*ry+0.1)<=1)P(cx+x,cy+y,y<0&&x<0?[112,110,116]:[86,84,92],2);}
   // bedrock
   for(let x=0;x<W;x++){const top=H-4-Math.round(3*Math.sin(x*0.13)+2*Math.sin(x*0.41));for(let y=top;y<H;y++)P(x,y,(x+y)%5?[44,44,52]:[58,58,66],2);}
-  // the pond, cut in half
-  const pd=G.pond;for(let y=0;y<14;y++){const w=Math.round(pd.rx*Math.sqrt(Math.max(0,1-(y/14)**2)));for(let x=-w-1;x<=w+1;x++)P(pd.cx+x,surf+y,Math.abs(x)>w-1?[30,26,24]:mix([16,32,60],[8,14,30],y/14),3);}
-  // cedar roots
-  const rootC=[58,42,33],rootH=[78,58,44];
-  const root=(x,y,a,len,w0,dep,rr)=>{for(let i=0;i<len;i++){a+=(rr()-0.5)*0.32;a+=(Math.PI/2-a)*0.02;x+=Math.cos(a);y+=Math.sin(a)*0.9;if(y>H-8||x<-4||x>W+4)return;
-    const w=Math.max(1,Math.round(w0*(1-i/len)));for(let k=0;k<w;k++)P(x+k-Math.floor(w/2),y,k===0&&w>1?rootH:rootC,1);
-    if(rr()<0.05&&dep<4&&len-i>8)root(x,y,a+(rr()<0.5?-1:1)*(0.5+rr()*0.7),(len-i)*0.6,Math.max(1,w-1),dep+1,rr);}};
-  const trunks=[...TRUNKS.map(f=>Math.round(f*W)+4),6,W-6];
-  trunks.forEach((tx,ti)=>{const rr=mulberry(500+ti*31),n=ti<3?4:3;for(let r=0;r<n;r++){const a=ti===3?0.3+r*0.35:ti===4?Math.PI-0.3-r*0.35:0.35+r*(2.4/(n-1));root(tx,surf+2,a,90+rr()*110,ti<3?4:5,0,rr);}});
   // something buried near the cedars
   GS.x=Math.round(W*0.14);GS.y=Math.round(surf+(H-surf)*0.5);for(let i=0;i<6;i++)P(GS.x-3+i,GS.y+Math.round(i*0.5),i===0||i===5?[90,90,96]:[150,255,170],4);
   b.putImageData(img,0,0);
+  // cedar roots, in three dimensions so they turn with the block
+  CEDAR_ROOTS.length=0;TRUNK3.length=0;const D=DEPTH();
+  const root=(x,y,z,a,h,len,w0,dep,rr)=>{for(let i=0;i<len;i++){a+=(rr()-0.5)*0.32;a+=(Math.PI/2-a)*0.02;h+=(rr()-0.5)*0.2;const c=Math.cos(a);x+=c*Math.cos(h)*1.2;z+=c*Math.sin(h)*1.2;y+=Math.sin(a)*0.9;if(y>H-8)return;
+    CEDAR_ROOTS.push({x,y:Math.round(y),z,w:Math.max(1,Math.round(w0*(1-i/len)))});
+    if(rr()<0.04&&dep<3&&len-i>8)root(x,y,z,a+(rr()<0.5?-1:1)*(0.5+rr()*0.7),h+(rr()-0.5)*1.6,(len-i)*0.6,Math.max(1,w0-1),dep+1,rr);}};
+  [...TRUNKS.map(f=>[Math.round(f*W)+4,-0.42*D,8]),[7,0.38*D,13],[W-7,0.38*D,13]].forEach(([tx,tz,tw],ti)=>{TRUNK3.push({x:tx,z:tz,w:tw});
+    const rr=mulberry(500+ti*31);for(let r=0;r<3;r++)root(tx,surf+2,tz,0.35+rr()*0.9,rr()*Math.PI*2,80+rr()*100,ti<3?3:4,0,rr);});
 }
-function genNet(seed,x0,y0,budget,trail){
-  const rng=mulberry(seed),pts=[{x:x0,y:y0,p:-1}];let tips=[];const n0=3+Math.floor(rng()*3);
-  for(let i=0;i<n0;i++)tips.push({x:x0,y:y0,a:Math.PI/2+(rng()-0.5)*2.4,i:0});
+function genNet(seed,x0,y0,z0,budget,trail){
+  const rng=mulberry(seed),pts=[{x:x0,y:y0,z:z0,p:-1,sx:x0}],Dh=DEPTH()*0.6;let tips=[];const n0=3+Math.floor(rng()*3);
+  for(let i=0;i<n0;i++)tips.push({x:x0,y:y0,z:z0,a:Math.PI/2+(rng()-0.5)*2.4,h:rng()*Math.PI*2,i:0});
   while(pts.length<budget&&tips.length){const next=[];
-    for(const t of tips){t.a+=(rng()-0.5)*0.7;t.a+=(Math.PI/2-t.a)*0.045;const nx=t.x+Math.cos(t.a),ny=t.y+Math.sin(t.a)*1.2;
-      if(ny<y0||ny>H-9||nx<1||nx>W-2)continue;t.x=nx;t.y=ny;pts.push({x:Math.round(nx),y:Math.round(ny),p:t.i});t.i=pts.length-1;next.push(t);
-      if(rng()<0.045&&next.length<28)next.push({x:nx,y:ny,a:t.a+(rng()<0.5?-1:1)*(0.6+rng()*0.7),i:t.i});
+    for(const t of tips){t.a+=(rng()-0.5)*0.7;t.a+=(Math.PI/2-t.a)*0.045;t.h+=(rng()-0.5)*0.5;
+      const c=Math.cos(t.a),nx=t.x+c*Math.cos(t.h)*1.3,nz=t.z+c*Math.sin(t.h)*1.3,ny=t.y+Math.sin(t.a)*1.2;
+      if(ny<y0||ny>H-9||nx<1||nx>W-2||Math.abs(nz)>Dh)continue;t.x=nx;t.y=ny;t.z=nz;pts.push({x:nx,y:Math.round(ny),z:nz,p:t.i,sx:nx});t.i=pts.length-1;next.push(t);
+      if(rng()<0.045&&next.length<28)next.push({x:nx,y:ny,z:nz,a:t.a+(rng()<0.5?-1:1)*(0.6+rng()*0.7),h:t.h+(rng()-0.5)*2,i:t.i});
       if(pts.length>=budget)break;}
     tips=next;}
-  if(trail){pts.trail=pts.length;let x=x0,y=y0+4,a;const lo=G.surf+6,hi=G.surf+30;
-    while(x>0){a=Math.PI+(rng()-0.5)*0.9;x+=Math.cos(a);y=clamp(y+Math.sin(a)*0.8,lo,hi);pts.push({x:Math.round(x),y:Math.round(y),p:pts.length-1});}
+  if(trail){pts.trail=pts.length;let x=x0,y=y0+4,z=z0;const lo=G.surf+6,hi=G.surf+30;
+    while(x>0){const a=Math.PI+(rng()-0.5)*0.9;x+=Math.cos(a);z=clamp(z-0.25+(rng()-0.5)*0.6,-Dh,Dh);y=clamp(y+Math.sin(a)*0.8,lo,hi);pts.push({x,y:Math.round(y),z,p:pts.length-1,sx:x});}
     if(pts.length>pts.trail)pts[pts.trail].p=0;}
   return pts;
 }
 function buildNets(){
   const now=Date.now(),tMin=now/60000,nets=[];
-  for(const s of SPOTS){const ph=((tMin+s.off)/s.period)%1;nets.push({id:'s'+s.id,kind:'spot',sp:s.sp,x:spotPos(s).x,grow:1,fade:1,fruiting:!!cycleState(ph),budget:WOOD[s.sp]?140:300,seed:s.id*101+3,z:netDepth(s)});}
+  for(const s of SPOTS){const ph=((tMin+s.off)/s.period)%1;nets.push({id:'s'+s.id,kind:'spot',sp:s.sp,x:spotPos(s).x,z0:zOf(s),grow:1,fade:1,fruiting:!!cycleState(ph),budget:WOOD[s.sp]?140:300,seed:s.id*101+3});}
   for(const c of state.colonies){const st=colonyState(c,now);if(st==='gone')continue;const age=now-c.born;if(age<0)continue;const inc=INCUB[c.sp]*HOUR;
-    nets.push({id:'c'+c.id,kind:'col',sp:c.sp,x:spotPos(c).x,col:c,grow:age<inc?0.16+0.84*(age/inc):1,mine:c.src==='you',fade:clamp((c.born+colonyLife(c)-now)/(12*HOUR),0.25,1),budget:WOOD[c.sp]?200:460,seed:(c.id%99991)+17,z:netDepth(c)});}
-  for(const n of nets){let pts=netCache.get(n.id);if(!pts){pts=genNet(n.seed,n.x,G.surf+2,n.budget,n.sp==='lantern');netCache.set(n.id,pts);}n.pts=pts;n.drawn=Math.min(pts.length,Math.max(1,Math.floor(pts.length*n.grow)));}
+    nets.push({id:'c'+c.id,kind:'col',sp:c.sp,x:spotPos(c).x,z0:zOf(c),col:c,grow:age<inc?0.16+0.84*(age/inc):1,mine:c.src==='you',fade:clamp((c.born+colonyLife(c)-now)/(12*HOUR),0.25,1),budget:WOOD[c.sp]?200:460,seed:(c.id%99991)+17});}
+  for(const n of nets){let pts=netCache.get(n.id);if(!pts){pts=genNet(n.seed,n.x,G.surf+2,n.z0,n.budget,n.sp==='lantern');netCache.set(n.id,pts);}n.pts=pts;n.drawn=Math.min(pts.length,Math.max(1,Math.floor(pts.length*n.grow)));
+    n.sx0=projX(n.x,n.z0);n.zd=projD(n.x,n.z0);}
   return nets;
 }
 // each species gets its own faint tint, so the webs can be told apart
 const NET_TINT={amanita:[244,190,178],chanterelle:[244,212,140],inkcap:[196,202,218],morel:[218,190,150],mycena:[150,240,210],oyster:[214,196,242],turkey:[236,172,128],hericium:[244,244,236],lantern:[255,120,205]};
 const netColor=sp=>NET_TINT[sp]||[228,230,214];
-// how near the front of the clearing a network's mushroom stands: 0 = back, 1 = front
-function netDepth(s){const p=spotPos(s);return clamp((p.y-G.gy)/G.gh,0,1);}
 let focusId=null,focusUntil=0;
 function paintNets(){withCtx(netLayer.getContext('2d'),()=>{ctx.clearRect(0,0,W,H);
-  const SOIL=[58,42,32],order=NETS.slice().sort((a,b)=>a.z-b.z);
+  const cs=Math.cos(rotShown),sn=Math.sin(rotShown),cx=W/2,D=DEPTH(),SOIL=[58,42,32];
+  // roots first, far to near
+  for(const r of CEDAR_ROOTS){r.sx=cx+(r.x-cx)*cs+r.z*sn;r.d=clamp((-(r.x-cx)*sn+r.z*cs)/D+0.5,0,1);}
+  const rs=CEDAR_ROOTS.slice().sort((a,b)=>a.d-b.d);
+  for(const r of rs){ctx.fillStyle=rgb(mix([36,26,21],[64,47,37],r.d));ctx.fillRect(Math.round(r.sx-r.w/2),r.y,r.w,1);}
+  // then every network, far to near
+  const order=NETS.slice().sort((a,b)=>a.zd-b.zd);
   for(const n of order){
-    const focused=focusId===n.id,dim=focusId&&!focused?0.2:1,near=n.sp==='lantern'?1:0.45+0.55*n.z;
-    let col=mix(netColor(n.sp),SOIL,n.sp==='lantern'?0:(1-n.z)*0.35);if(n.mine||focused)col=mix(col,[255,255,255],0.25);
+    const focused=focusId===n.id,dim=focusId&&!focused?0.2:1,near=n.sp==='lantern'?1:0.4+0.6*n.zd;
+    let col=mix(netColor(n.sp),SOIL,n.sp==='lantern'?0:(1-n.zd)*0.4);if(n.mine||focused)col=mix(col,[255,255,255],0.25);
     const base=focused?0.85:n.kind==='spot'?0.32:n.mine?0.62:0.45,a0=base*n.fade*(focused?1:near)*dim,len=n.pts.length;
-    for(let i=0;i<n.drawn;i++){const p=n.pts[i];R(p.x,p.y,1,1,col,a0*(1-0.5*i/len));}
-    R(n.x-1,G.surf+2,3,2,col,Math.min(1,a0+0.15));}});}
+    for(let i=0;i<n.pts.length;i++){const p=n.pts[i];p.sx=cx+(p.x-cx)*cs+p.z*sn;if(i<n.drawn)R(p.sx,p.y,1,1,col,a0*(1-0.5*i/len));}
+    R(n.sx0-1,G.surf+2,3,2,col,Math.min(1,a0+0.15));}});}
 function wormAt(t){return{x:W*(0.5+0.4*Math.sin(t/37+1)),y:G.surf+(H-G.surf)*(0.42+0.12*Math.sin(t/53))+5*Math.sin(t/11)};}
+function pondCut(){const pd=G.pond,pz=(clamp((pd.cy-G.gy)/G.gh,0,1)-0.5)*DEPTH();return{x:projX(pd.cx,pz),rx:Math.round(pd.rx*(0.5+0.5*Math.abs(Math.cos(rotShown)))+8*Math.abs(Math.sin(rotShown)))};}
 function below(tS,dt){
   const L=lightLevel(),sk=sky(),surf=G.surf,bt=beatTime(),e=reduce?0.3:kickEnv(bt),lvl=beatLevel(L);
+  rotShown+=(rotY-rotShown)*(reduce?1:Math.min(1,dt*12));if(Math.abs(rotY-rotShown)<0.002)rotShown=rotY;
   ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
   ctx.drawImage(belowBg,0,0);
-  // the clearing, seen edge-on above the cut
+  // the clearing, seen edge-on above the cut, turning with the block
   const airT=mix(mix([8,12,30],[70,104,100],L),[40,44,54],sk.rain*0.5),airB=mix(mix([18,24,40],[96,130,104],L),[48,52,60],sk.rain*0.5);
   for(let y=0;y<surf;y++)R(0,y,W,1,mix(airT,airB,y/surf));
-  for(const f of TRUNKS){const x=Math.round(f*W);R(x,0,8,surf,[12,14,22]);}
-  R(0,0,13,surf,[6,8,11]);R(W-13,0,13,surf,[6,8,11]);
-  const lg=G.log,st=G.stump;R(lg.x0,surf-7,lg.x1-lg.x0,7,[50,37,30]);R(lg.x0,surf-7,lg.x1-lg.x0,1,[66,98,60]);for(let x=lg.x0+3;x<lg.x1;x+=7)R(x,surf-4,4,1,[30,22,19]);
-  R(st.x-6,surf-9,12,9,[50,37,30]);R(st.x-6,surf-9,12,1,[120,92,66]);
+  for(const t of TRUNK3.slice().sort((a,b)=>projD(a.x,a.z)-projD(b.x,b.z))){const d=projD(t.x,t.z);R(projX(t.x,t.z)-t.w/2,0,t.w,surf,mix([16,18,28],[6,8,11],d));}
+  const pc=pondCut();for(let y=0;y<14;y++){const w=Math.round(pc.rx*Math.sqrt(Math.max(0,1-(y/14)**2)));R(pc.x-w-1,surf+y,2*w+3,1,[30,26,24]);R(pc.x-w,surf+y,2*w+1,1,mix([16,32,60],[8,14,30],y/14));}
+  const lg=G.log,st=G.stump,lz=zOf({a:'log',f:0.5}),sz=zOf({a:'stump',side:1});
+  const la=projX(lg.x0,lz),lb=projX(lg.x1,lz),l0=Math.min(la,lb),l1=Math.max(la,lb);
+  R(l0,surf-7,Math.max(4,l1-l0),7,[50,37,30]);R(l0,surf-7,Math.max(4,l1-l0),1,[66,98,60]);for(let x=l0+3;x<l1;x+=7)R(x,surf-4,4,1,[30,22,19]);
+  const sxp=projX(st.x,sz);R(sxp-6,surf-9,12,9,[50,37,30]);R(sxp-6,surf-9,12,1,[120,92,66]);
   const lf=0.62+0.38*L,now=Date.now(),tMin=now/60000,shown=[];
   for(const s of SPOTS){const x=(tMin+s.off)/s.period,k=Math.floor(x),c=cycleState(x-k);if(c)shown.push([s,c,0.85+0.3*hash(s.id*131+k)]);}
   for(const c of state.colonies){const s2=colonyState(c,now);if(s2&&s2!=='gone'&&!s2.hidden&&!(c.sp==='lantern'&&L>0.35))shown.push([c,s2,0.95]);}
-  for(const [s,c,v] of shown){const x=spotPos(s).x,y=s.a==='log'?surf-2:s.a==='stump'?surf-3:surf;drawShroom(s.sp,x,y,c.g,c.d,v,s.side||1,lf,L);
+  for(const it of shown){const s=it[0];it.x=projX(spotPos(s).x,zOf(s));it.d=projD(spotPos(s).x,zOf(s));}
+  shown.sort((a,b)=>a.d-b.d);
+  for(const it of shown){const [s,c,v]=it,x=it.x,y=s.a==='log'?surf-2:s.a==='stump'?surf-3:surf;drawShroom(s.sp,x,y,c.g,c.d,v,s.side||1,lf*(0.75+0.25*it.d),L);
     if(s.sp==='lantern'){ctx.globalCompositeOperation='lighter';glow(x,y-6,10*c.g,[255,96,190],(0.22+0.5*e*Math.max(lvl,0.3))*(1-c.d));ctx.globalCompositeOperation='source-over';}}
-  // mycelium networks, repainted only when something has grown
+  // mycelium networks and roots, repainted only when something grows or the block turns
   NETS=buildNets();if(focusId&&(tS>focusUntil||!NETS.some(n=>n.id===focusId)))focusId=null;
-  const key=(focusId||'')+'|'+NETS.map(n=>n.id+':'+Math.round(n.grow*25)+':'+Math.round(n.fade*4)).join(',');
+  const key=(focusId||'')+'|'+Math.round(rotShown*300)+'|'+NETS.map(n=>n.id+':'+Math.round(n.grow*25)+':'+Math.round(n.fade*4)).join(',');
   if(key!==netKey){netKey=key;paintNets();}
   ctx.drawImage(netLayer,0,0);
   ctx.globalCompositeOperation='lighter';
-  if(focusId){const n=NETS.find(q=>q.id===focusId);if(n)glow(n.x,G.surf+3,10,netColor(n.sp),0.28+0.1*Math.sin(tS*2));}
+  if(focusId){const n=NETS.find(q=>q.id===focusId);if(n)glow(n.sx0,G.surf+3,10,netColor(n.sp),0.28+0.1*Math.sin(tS*2));}
   for(const n of NETS){if(n.kind!=='col'||n.grow>=1)continue;const col=PRINT[n.sp].glow||[190,255,225],pulse=0.5+0.5*Math.sin(tS*1.2+n.x);
-    glow(n.x,G.surf+3,7,col,(n.mine?0.22:0.1)*(0.6+0.4*pulse));
-    for(let i=Math.max(0,n.drawn-36);i<n.drawn;i++){const p=n.pts[i];R(p.x,p.y,1,1,col,(n.mine?0.55:0.3)*(0.5+0.5*pulse)*(1-(n.drawn-i)/36));}}
-  if(belowFlash&&tS-belowFlash.t<1.4){const n=NETS.find(q=>q.id===belowFlash.id);if(n){const a=1-(tS-belowFlash.t)/1.4,col=netColor(n.sp);for(let i=0;i<n.drawn;i++){const p=n.pts[i];R(p.x,p.y,1,1,col,0.55*a);}}}
+    glow(n.sx0,G.surf+3,7,col,(n.mine?0.22:0.1)*(0.6+0.4*pulse));
+    for(let i=Math.max(0,n.drawn-36);i<n.drawn;i++){const p=n.pts[i];R(p.sx,p.y,1,1,col,(n.mine?0.55:0.3)*(0.5+0.5*pulse)*(1-(n.drawn-i)/36));}}
+  if(belowFlash&&tS-belowFlash.t<1.4){const n=NETS.find(q=>q.id===belowFlash.id);if(n){const a=1-(tS-belowFlash.t)/1.4,col=netColor(n.sp);for(let i=0;i<n.drawn;i++){const p=n.pts[i];R(p.sx,p.y,1,1,col,0.55*a);}}}
   // nutrients flowing toward the mushrooms
   if(Math.random()<dt*7&&sparks.length<34){const cands=NETS.filter(n=>n.drawn>24);if(cands.length){const n=cands[Math.floor(Math.random()*cands.length)];sparks.push({pts:n.pts,i:Math.floor(n.drawn*(0.4+Math.random()*0.6))-1,acc:0,c:mix(netColor(n.sp),[255,255,255],0.4)});}}
-  for(let i=sparks.length-1;i>=0;i--){const s=sparks[i];s.acc+=dt;while(s.acc>0.03&&s.i>=0){s.acc-=0.03;s.i=s.pts[s.i].p;}if(s.i<0){sparks.splice(i,1);continue;}const p=s.pts[s.i];R(p.x,p.y,1,1,s.c,0.85);}
+  for(let i=sparks.length-1;i>=0;i--){const s=sparks[i];s.acc+=dt;while(s.acc>0.03&&s.i>=0){s.acc-=0.03;s.i=s.pts[s.i].p;}if(s.i<0){sparks.splice(i,1);continue;}const p=s.pts[s.i];R(p.sx,p.y,1,1,s.c,0.85);}
   // the lantern threads carry the beat away toward the music
   for(const n of NETS){if(n.sp!=='lantern'||!n.pts.trail||n.drawn<=n.pts.trail)continue;const tl=n.drawn-n.pts.trail,ph=((bt/BEAT)%1+1)%1,head=n.pts.trail+Math.floor(ph*tl);
-    for(let k=0;k<6;k++){const p=n.pts[head-k];if(p&&head-k>=n.pts.trail)R(p.x,p.y,1,1,[255,140,215],(0.9-k*0.14)*(0.4+0.6*lvl));}}
+    for(let k=0;k<6;k++){const p=n.pts[head-k];if(p&&head-k>=n.pts.trail)R(p.sx,p.y,1,1,[255,140,215],(0.9-k*0.14)*(0.4+0.6*lvl));}}
   glow(GS.x,GS.y+1,9,[120,255,160],0.14+0.06*Math.sin(tS*0.8));
   ctx.globalCompositeOperation='source-over';
   // the beat, felt through the soil
@@ -1030,21 +1048,23 @@ function tapBelow(x,y){
   if(y<G.surf)return say('Up there, the grove carries on without you.');
   if(Math.hypot(x-worm.hx,y-worm.hy)<7){worm.startle=tS;blip(pan);say('An earthworm, minding its own business. It speeds up.');note('worm');return;}
   if(Math.hypot(x-GS.x,y-GS.y)<7){chime(PENTA[4]+12,pan,0.05);say('A glow stick, still faintly glowing. How long has it been down here?');note('glowstick');return;}
-  // nearest thread wins, with a nudge toward the front layers and whatever is already in focus
-  let hit=null,bd=4;for(const n of NETS){const bias=n.z*1.5+(n.id===focusId?2:0)+(n.mine?1:0);for(let i=0;i<n.drawn;i+=2){const p=n.pts[i],dd=Math.abs(p.x-x)+Math.abs(p.y-y);if(dd<4&&dd-bias<bd){bd=dd-bias;hit=n;}}}
+  // nearest thread wins, with a nudge toward the front and whatever is already in focus
+  let hit=null,bd=4;for(const n of NETS){const bias=n.zd*1.5+(n.id===focusId?2:0)+(n.mine?1:0);for(let i=0;i<n.drawn;i+=2){const p=n.pts[i],dd=Math.abs(p.sx-x)+Math.abs(p.y-y);if(dd<4&&dd-bias<bd){bd=dd-bias;hit=n;}}}
   if(hit){belowFlash={id:hit.id,t:tS};focusId=hit.id;focusUntil=tS+14;chime(PENTA[NOTE[hit.sp]],pan,0.08);say(netLine(hit),9000);return;}
   const hadFocus=focusId;focusId=null;
+  const pc=pondCut();if(Math.abs(x-pc.x)<pc.rx&&y<G.surf+12){plop(pan);return say('The bottom of the pond. Cold and very still.');}
+  if(CEDAR_ROOTS.some(r=>Math.abs(r.sx-x)<=r.w/2+1&&Math.abs(r.y-y)<=1)){puff(pan);return say('Cedar roots. The mycelium wraps around them, trading sugar for water and minerals.');}
   const m=belowMask[Math.round(y)*W+Math.round(x)];
-  if(m===1){puff(pan);return say('Cedar roots. The mycelium wraps around them, trading sugar for water and minerals.');}
   if(m===2)return say('A stone, older than everything else down here.');
-  if(m===3){plop(pan);return say('The bottom of the pond. Cold and very still.');}
   if(hadFocus)return say('Back to the whole web.');
   say(sky().rain>0.25?'Cool, wet soil. The rain is finding its way down.':'Cool, damp soil. The beat comes through as a slow thump.');
 }
 const vBtn=document.getElementById('vbtn');
 function setView(v){
   if(v===view)return;view=v;vBtn.textContent=v?'Back up':'Go below';vBtn.setAttribute('aria-pressed',v?'true':'false');
-  if(v){const first=!state.journal.web;note('web',true);if(first)say('Below the moss. Every mushroom up there is just the fruit of this.',8000);}
+  if(v){const first=!state.journal.web;note('web',true);
+    if(first)say('Below the moss. Every mushroom up there is just the fruit of this. Drag sideways to turn it.',9000);
+    else if(!state.turnTip)say('Drag sideways to turn the soil and see what\'s behind.',7000);}
   updateStatus();
 }
 vBtn.addEventListener('click',()=>setView(view?0:1));
@@ -1077,10 +1097,17 @@ function addPulse(x,y){
   return targets.length;
 }
 let down=null;
-cv.addEventListener('pointerdown',ev=>{down={x:ev.clientX,y:ev.clientY};try{cv.setPointerCapture(ev.pointerId);}catch(e){}});
+cv.addEventListener('pointerdown',ev=>{down={x:ev.clientX,y:ev.clientY,rot:rotY,mode:null};try{cv.setPointerCapture(ev.pointerId);}catch(e){}});
+// below the moss, dragging sideways turns the block of soil
+cv.addEventListener('pointermove',ev=>{
+  if(!down||view!==1||viewP!==1)return;const dx=ev.clientX-down.x,dy=ev.clientY-down.y;
+  if(!down.mode){if(Math.abs(dx)>10&&Math.abs(dx)>Math.abs(dy)*1.2)down.mode='turn';else if(Math.abs(dy)>10)down.mode='swipe';}
+  if(down.mode==='turn')rotY=clamp(down.rot+dx/cv.getBoundingClientRect().width*2.4,-1.15,1.15);
+});
 cv.addEventListener('pointercancel',()=>{down=null;});
 cv.addEventListener('pointerup',ev=>{
   if(!down)return;const d=down;down=null;const dx=ev.clientX-d.x,dy=ev.clientY-d.y;
+  if(d.mode==='turn'){if(!state.turnTip){state.turnTip=1;save();}return;}
   if(Math.abs(dy)>50&&Math.abs(dy)>Math.abs(dx)*1.5){if(dy<0)setView(1);else setView(0);return;}
   if(Math.hypot(dx,dy)>12||viewP!==view)return;
   const r=cv.getBoundingClientRect(),x=(d.x-r.left)/r.width*W,y=(d.y-r.top)/r.height*H;
