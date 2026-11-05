@@ -1062,7 +1062,8 @@ function tapBelow(x,y){
 const vBtn=document.getElementById('vbtn');
 function setView(v){
   if(v===view)return;view=v;
-  rotY=0; // the soil swings back to face-on as you move between views, so the cut lines up with the clearingvBtn.textContent=v?'Back up':'Go below';vBtn.setAttribute('aria-pressed',v?'true':'false');
+  rotY=0; // the soil swings back to face-on as you move between views, so the cut lines up with the clearing
+  vBtn.textContent=v?'Go above':'Go below';vBtn.setAttribute('aria-pressed',v?'true':'false');
   if(v){const first=!state.journal.web;note('web',true);
     if(first)say('Below the moss. Every mushroom up there is just the fruit of this. Drag sideways to turn it.',9000);
     else if(!state.turnTip)say('Drag sideways to turn the soil and see what\'s behind.',7000);}
