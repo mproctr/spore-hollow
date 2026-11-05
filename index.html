@@ -421,7 +421,7 @@ function safePlace(sp,r1,r2){
   if(sp==='turkey'&&r2<0.5)return{a:'stump',side:r1<0.5?-1:1};
   if(WOOD[sp])return{a:'log',f:0.1+r1*0.8};
   const pos={a:'g',nx:0.08+r1*0.84,ny:0.14+r2*0.8};
-  for(let i=0;i<4;i++){const p={x:pos.nx*W,y:G.gy+pos.ny*G.gh};if(!inPond0(p.x,p.y)&&!onLog0(p.x,p.y))break;pos.nx=0.08+((pos.nx-0.08+0.29)%0.84);pos.ny=0.14+((pos.ny-0.14+0.37)%0.8);}
+  for(let i=0;i<4;i++){const p=spotPos(pos);if(!inPond(p.x,p.y)&&!onLog(p.x,p.y))break;pos.nx=0.08+((pos.nx-0.08+0.29)%0.84);pos.ny=0.14+((pos.ny-0.14+0.37)%0.8);}
   return pos;
 }
 function pruneColonies(){const now=Date.now(),n=state.colonies.length;state.colonies=state.colonies.filter(c=>colonyState(c,now)!=='gone');return n!==state.colonies.length;}
@@ -443,42 +443,13 @@ function cycleState(p){
   if(p<0.78)return{g:1,d:0,stage:'mature'};
   return{g:1,d:(p-0.78)/0.12,stage:'decay'};
 }
-/* ---------- the clearing in 3D: x across, z front-to-back; you can walk around it ---------- */
-let rotY=0,rotShown=0; // how far you've walked around (radians): the target, and the eased value drawn
-const ROT_MAX=1.0;
-const DEPTH=()=>W*0.7;
-const zFromY=y=>((y-G.gy)/G.gh-0.5)*DEPTH();
-// where something sits in the world
-function wpos(s){
-  const {log,stump,pond}=G;
-  if(s.a==='log')return{x:log.x0+(log.x1-log.x0)*s.f,z:zFromY(log.y),lift:2};
-  if(s.a==='stump')return{x:stump.x+s.side*Math.floor(stump.w/2),z:zFromY(stump.y),lift:3};
-  if(s.a==='pond')return{x:pond.cx+Math.cos(s.ang)*(pond.rx+4),z:zFromY(pond.cy)+Math.sin(s.ang)*(pond.rx+4),lift:0};
-  return{x:s.nx*W,z:(s.ny-0.5)*DEPTH(),lift:0};
-}
-// ...and where that lands on screen from the current angle (shared by both views)
-function projX(x,z){return W/2+(x-W/2)*Math.cos(rotShown)+z*Math.sin(rotShown);}
-function projDu(x,z){return(-(x-W/2)*Math.sin(rotShown)+z*Math.cos(rotShown))/DEPTH()+0.5;} // 0 back edge, 1 front edge
-function projD(x,z){return clamp(projDu(x,z),0,1);}
-function groundY(dn){return dn>=0?G.gy+dn*G.gh:G.gy+dn*G.gh*0.15;}
-function screenToGround(x,y){const d=((y-G.gy)/G.gh-0.5)*DEPTH(),c=Math.cos(rotShown),sn=Math.sin(rotShown),xr=x-W/2;
-  return{a:'g',nx:clamp((xr*c-d*sn+W/2)/W,0.03,0.97),ny:clamp((xr*sn+d*c)/DEPTH()+0.5,0.02,0.99)};}
-const V={log:{},stump:{},pond:{},party:{}};
-function updateView(){
-  const {log,stump,pond,party}=G,lz=zFromY(log.y);
-  V.log={ax:projX(log.x0,lz),ay:groundY(projDu(log.x0,lz)),bx:projX(log.x1,lz),by:groundY(projDu(log.x1,lz)),h:log.h};
-  const sz=zFromY(stump.y);V.stump={x:projX(stump.x,sz),y:groundY(projDu(stump.x,sz)),w:stump.w,h:stump.h};
-  const pz=zFromY(pond.cy);V.pond={cx:projX(pond.cx,pz),cy:groundY(projDu(pond.cx,pz)),rx:pond.rx,ry:pond.ry};
-  const qz=-1.25*DEPTH();V.party={x:projX(party.x,qz),y:G.gy,fade:clamp((0.3-projDu(party.x,qz))/0.3,0,1)};
-}
-function logParam(x,y){const l=V.log,dx=l.bx-l.ax,dy=l.by-l.ay;return clamp(((x-l.ax)*dx+(y-l.ay)*dy)/(dx*dx+dy*dy||1),0,1);}
 function spotPos(s){
-  if(s.a==='pond'){const a=s.ang-rotShown,y=V.pond.cy+Math.sin(a)*(V.pond.ry+4);return{x:Math.round(V.pond.cx+Math.cos(a)*(V.pond.rx+4)),y:Math.round(y),k:y};}
-  if(s.a==='log'){const l=V.log,x=l.ax+(l.bx-l.ax)*s.f,y=l.ay+(l.by-l.ay)*s.f;return{x:Math.round(x),y:Math.round(y-2),k:y+0.2};}
-  if(s.a==='stump')return{x:Math.round(V.stump.x+s.side*Math.floor(V.stump.w/2)),y:Math.round(V.stump.y-3),k:V.stump.y+0.2};
-  const w=wpos(s),y=groundY(projDu(w.x,w.z));return{x:Math.round(projX(w.x,w.z)),y:Math.round(y),k:y};
+  const {gy,gh,log,stump,pond}=G;
+  if(s.a==='log')return{x:Math.round(log.x0+(log.x1-log.x0)*s.f),y:log.y-2};
+  if(s.a==='stump')return{x:stump.x+s.side*Math.floor(stump.w/2),y:stump.y-3};
+  if(s.a==='pond')return{x:Math.round(pond.cx+Math.cos(s.ang)*(pond.rx+4)),y:Math.round(pond.cy+Math.sin(s.ang)*(pond.ry+4))};
+  return{x:Math.round(s.nx*W),y:Math.round(gy+s.ny*gh)};
 }
-function frogPos(){const a=Math.PI-rotShown;return{x:Math.round(V.pond.cx+Math.cos(a)*(V.pond.rx+1)),y:Math.round(V.pond.cy+Math.sin(a)*(V.pond.ry+1)-1)};}
 
 /* ---------- shadow folk ---------- */
 const SPR={
@@ -495,12 +466,12 @@ const CRIT=[
 ];
 for(const c of CRIT){c.hide=0;c.blink=performance.now()/1000+2+Math.random()*4;}
 function critPos(c){
-  if(c.log){const l=V.log,x=l.ax+(l.bx-l.ax)*0.64,y=l.ay+(l.by-l.ay)*0.64;return{x:Math.round(x),y:Math.round(y-l.h+3),k:y-0.1};}
-  const z=(c.ny-0.5)*DEPTH(),x0=c.nx*W,y=groundY(projDu(x0,z));return{x:Math.round(projX(x0,z)),y:Math.round(y),k:y};
+  if(c.log)return{x:Math.round(G.log.x0+(G.log.x1-G.log.x0)*0.64),y:G.log.y-G.log.h+3};
+  return{x:Math.round(c.nx*W),y:Math.round(G.gy+c.ny*G.gh)};
 }
 
 /* ---------- layout ---------- */
-let BGC=null,bgKey=-1,skyMask=new Uint8Array(1),showerAnnounced=false,lastHidden=[],wasRaining=null;
+let bgKey=-1,skyMask=new Uint8Array(1),showerAnnounced=false,lastHidden=[],wasRaining=null;
 const drops=[],taken=new Set();
 const meteors=[];
 const WISHES=['You make a wish. The grove keeps it to itself.','Wish made. The moss seems to approve.','You make a wish. Something past the cedars cheers.'];
@@ -533,33 +504,12 @@ function layout(){
   bakeBelow();
 }
 
-/* ---------- things in the clearing that move as you walk around ---------- */
-function ell(cx,cy,rx,ry,c){cx=Math.round(cx);cy=Math.round(cy);for(let y=-ry;y<=ry;y++){const w=Math.round(rx*Math.sqrt(Math.max(0,1-(y*y)/((ry+0.01)*(ry+0.01)))));R(cx-w,cy+y,2*w+1,1,c);}}
-function drawTrunk(t){const C=BGC,dn=projDu(t.x,t.z),x=Math.round(projX(t.x,t.z)),base=Math.round(groundY(dn)),w=Math.max(4,Math.round(t.w*(0.8+0.5*clamp(dn,0,1)))),x0=x-Math.floor(w/2);
-  const col=mix(C.mid,C.dark,clamp(dn,0,1)*0.6),hi=mix(col,C.skyB,0.3);
-  R(x0,0,w,base-3,col);R(x0,0,1,base-3,hi);for(let k=0;k<4;k++){const y=base-4+k,f=k+1;R(x0-f,y,w+2*f,1,col);R(x0-f,y,1,1,hi);}
-  for(let i=0;i<26;i++){const yy=Math.floor(hash(t.x*7.1+i)*(base-4)),xx=x0+1+Math.floor(hash(t.x*3.3+i*1.7)*(w-2));R(xx,yy,1,2,C.dark);}
-  R(x0-5,base,w+10,1,mix(C.dark,C.mossF,0.4));}
-function drawLog(){const C=BGC,l=V.log,h=l.h,n=Math.max(2,Math.round(Math.max(Math.abs(l.bx-l.ax),Math.abs(l.by-l.ay))));
-  for(let i=0;i<=n;i++){const t=i/n,x=Math.round(l.ax+(l.bx-l.ax)*t),y=Math.round(l.ay+(l.by-l.ay)*t);
-    R(x,y,1,1,mix(C.dark,C.mossF,0.3));R(x,y-h,1,h,C.bark);R(x,y-h,1,1,mix(C.mossH,C.bark,0.35));
-    if(hash(i*1.3)<0.5)R(x,y-h-1,1,1,mix(C.mossH,C.mossN,0.3));if(hash(i*2.7)<0.4)R(x,y-h+2+Math.floor(hash(i*5.1)*(h-2)),1,1,C.barkD);}
-  const ex=Math.round(l.bx),ey=Math.round(l.by-Math.ceil(h/2));ell(ex,ey,2,Math.floor(h/2),C.wood);R(ex,ey,1,1,C.ring);}
-function drawStump(){const C=BGC,s=V.stump,x0=Math.round(s.x-s.w/2),y=Math.round(s.y);
-  R(x0-3,y,s.w+7,1,mix(C.dark,C.mossF,0.3));R(x0,y-s.h,s.w,s.h,C.bark);for(let yy=y-s.h;yy<y;yy+=2)R(x0+2+((yy>>1)%3)*3,yy,1,1,C.barkD);
-  ell(s.x,y-s.h,Math.floor(s.w/2),2,C.wood);ell(s.x,y-s.h,Math.floor(s.w/2)-2,1,C.ring);R(x0-2,y-2,2,2,C.bark);R(x0+s.w,y-2,3,2,C.bark);}
-function drawPond(L,wet){const C=BGC,p=V.pond,ma=clamp(1-L*1.6,0,1)*clamp(1-wet*1.4,0,1);
-  ell(p.cx,p.cy,p.rx+1,p.ry+1,mix(C.dark,C.mossF,0.4));ell(p.cx,p.cy,p.rx,p.ry,C.pond);
-  if(ma>0)for(let j=0;j<p.ry*2-3;j++)if(j%2===0||j<3)R(Math.round(p.cx+p.rx*0.25)+(j%3===1?1:0),Math.round(p.cy)-p.ry+2+j,1,1,C.pondH,0.75*ma);
-  for(const [a,r,sz] of [[2.75,0.55,3],[-0.45,0.62,2]]){const aa=a-rotShown;ell(p.cx+Math.cos(aa)*p.rx*r,p.cy+Math.sin(aa)*p.ry*r,sz,1,C.pad);}}
-
 /* ---------- static background (same grove every time) ---------- */
 function buildBG(L,warm,wet){
   const t=L*0.7;
   const N={skyT:[8,12,34],skyB:[26,32,72],far:[20,24,48],mid:[11,13,22],mossF:[16,30,34],mossN:[28,58,40],mossH:[56,94,58],dark:[5,7,10],can:[9,22,21],canH:[20,42,33],bark:[50,37,30],barkD:[28,21,18],wood:[120,92,66],ring:[84,62,44],pond:[9,18,40],pondH:[80,100,150],strand:[30,52,40],pad:[24,52,34]};
   const D={skyT:[64,112,118],skyB:[150,186,150],far:[54,76,72],mid:[28,38,38],mossF:[40,72,52],mossN:[62,112,62],mossH:[112,162,84],dark:[12,18,18],can:[22,54,38],canH:[58,98,58],bark:[92,68,50],barkD:[52,38,30],wood:[176,140,100],ring:[130,98,70],pond:[30,64,74],pondH:[160,200,196],strand:[60,96,64],pad:[50,96,56]};
   const C={};for(const k in N)C[k]=mix(N[k],D[k],t);
-  BGC=C;
   const CLOUD=mix([30,34,46],[120,132,138],L);C.skyT=mix(C.skyT,CLOUD,wet*0.6);C.skyB=mix(C.skyB,CLOUD,wet*0.55);C.far=mix(C.far,CLOUD,wet*0.3);
   const img=bctx.createImageData(W,H),d=img.data;
   const P=(x,y,c)=>{x=Math.round(x);y=Math.round(y);if(x<0||y<0||x>=W||y>=H)return;const i=(y*W+x)*4;d[i]=c[0];d[i+1]=c[1];d[i+2]=c[2];d[i+3]=255;skyMask[y*W+x]=0;};
@@ -586,8 +536,33 @@ function buildBG(L,warm,wet){
   for(let y=gy;y<H;y++){const tt=(y-gy)/gh,base=mix(C.mossF,C.mossN,Math.pow(tt,0.8));for(let x=0;x<W;x++){const n=rg();P(x,y,n<0.05?mix(base,C.mossH,0.6):n<0.11?mix(base,C.dark,0.35):base);}}
   const rt=mulberry(404);
   for(let i=0;i<110;i++){const x=rt()*W,y=gy+3+rt()*(gh-3),h=1+Math.floor(rt()*3),tt=(y-gy)/gh;for(let j=0;j<h;j++)P(x,y-j,mix(mix(C.mossH,C.mossN,j/h),C.mossF,1-tt));}
+  // mid trunks
+  const rm=mulberry(505);
+  for(const fx of [0.31,0.55,0.76]){const x=Math.round(fx*W),w=6+Math.floor(rm()*4),base=gy+6+Math.floor(rm()*10);
+    for(let y=0;y<base;y++){const flare=y>base-4?(y-(base-4)):0;Rb(x-flare,y,w+flare*2,1,C.mid);P(x-flare,y,mix(C.mid,C.skyB,0.32));}
+    for(let i=0;i<40;i++){const yy=Math.floor(rm()*base),xx=x+1+Math.floor(rm()*(w-2));P(xx,yy,C.dark);P(xx,yy+1,C.dark);}
+    Rb(x-5,base,w+10,1,mix(C.dark,C.mossF,0.4));}
   // daylight shafts
   if(L>0.05){for(const sx of [0.22,0.48,0.7]){for(let y=0;y<gy+gh*0.6;y++){const x0=Math.round(sx*W+y*0.35);for(let k=0;k<6;k++)if(BAYER[y&3][(x0+k)&3]<8)B(x0+k,y,[230,240,200],0.12*L);}}}
+  // log
+  const lg=G.log,rl=mulberry(606);
+  Rb(lg.x0,lg.y-lg.h,lg.x1-lg.x0,lg.h,C.bark);
+  for(let x=lg.x0;x<lg.x1;x++){P(x,lg.y-lg.h,mix(C.mossH,C.bark,0.35));if(rl()<0.5)P(x,lg.y-lg.h-1,mix(C.mossH,C.mossN,0.3));}
+  for(let i=0;i<28;i++){const x=lg.x0+Math.floor(rl()*(lg.x1-lg.x0-3)),y=lg.y-lg.h+2+Math.floor(rl()*(lg.h-2)),l=2+Math.floor(rl()*4);for(let k=0;k<l;k++)P(x+k,y,C.barkD);}
+  Rb(lg.x0-2,lg.y,lg.x1-lg.x0+5,1,mix(C.dark,C.mossF,0.3));
+  E(lg.x1,lg.y-Math.ceil(lg.h/2),3,Math.floor(lg.h/2),C.wood);E(lg.x1,lg.y-Math.ceil(lg.h/2),1,1,C.ring);
+  for(let y=lg.y-lg.h;y<lg.y;y++)if(y%2)P(lg.x0-1,y,C.bark);
+  // stump
+  const st=G.stump,sx0=st.x-Math.floor(st.w/2);
+  Rb(sx0,st.y-st.h,st.w,st.h,C.bark);
+  for(let y=st.y-st.h;y<st.y;y+=2)P(sx0+2+((y>>1)%3)*3,y,C.barkD);
+  E(st.x,st.y-st.h,Math.floor(st.w/2),2,C.wood);E(st.x,st.y-st.h,Math.floor(st.w/2)-2,1,C.ring);P(st.x,st.y-st.h,C.wood);
+  Rb(sx0-2,st.y-2,2,2,C.bark);Rb(sx0+st.w,st.y-2,3,2,C.bark);Rb(sx0-3,st.y,st.w+7,1,mix(C.dark,C.mossF,0.3));
+  // pond
+  const pd=G.pond;
+  E(pd.cx,pd.cy,pd.rx+1,pd.ry+1,mix(C.dark,C.mossF,0.4));E(pd.cx,pd.cy,pd.rx,pd.ry,C.pond);
+  if(ma>0)for(let j=0;j<pd.ry*2-3;j++)if(j%2===0||j<3)B(pd.cx+Math.round(pd.rx*0.25)+(j%3===1?1:0),pd.cy-pd.ry+2+j,C.pondH,0.75*ma);
+  E(pd.cx-Math.round(pd.rx*0.45),pd.cy+2,3,1,C.pad);E(pd.cx+Math.round(pd.rx*0.55),pd.cy-2,2,1,C.pad);P(pd.cx-Math.round(pd.rx*0.45),pd.cy+2,mix(C.pond,C.pad,0.4));
   // near trunks (deep shadow edges)
   for(let y=0;y<H;y++){const ex=y>H-34?Math.round((y-(H-34))*0.5):0,w=14+ex;Rb(-2,y,w,1,C.dark);P(w-2,y,mix(C.dark,C.skyB,0.16));Rb(W-w+2,y,w,1,C.dark);P(W-w+2,y,mix(C.dark,C.skyB,0.1));}
   // canopy
@@ -789,7 +764,6 @@ let view=0,viewP=0;
 function frame(now){
   const tS=now/1000,dt=Math.min(0.05,(now-lastFrame)/1000);lastFrame=now;
   viewP+=(view-viewP)*(reduce?1:Math.min(1,dt*5));if(Math.abs(view-viewP)<0.003)viewP=view;
-  rotShown+=(rotY-rotShown)*(reduce?1:Math.min(1,dt*12));if(Math.abs(rotY-rotShown)<0.002)rotShown=rotY;
   const off=Math.round(viewP*H);
   if(viewP<1){ctx.save();ctx.translate(0,-off);above(now,tS,dt);ctx.restore();}
   if(viewP>0){ctx.save();ctx.translate(0,H-off);below(tS,dt);ctx.restore();}
@@ -813,8 +787,7 @@ function above(now,tS,dt){
   const bt=beatTime(),e=reduce?0.5:kickEnv(bt),lvl=beatLevel(L),leaning=Date.now()<leanUntil;
   const pc=PARTY[Math.floor(bt/(BEAT*8))%4|0]||PARTY[0],pc2=PARTY[(Math.floor(bt/(BEAT*8))+2)%4|0]||PARTY[2];
   let I=lvl*(0.5+0.5*e)*(leaning?1.5:1);
-  updateView();
-  const {gy,gh}=G,party=V.party,pond=V.pond;I*=party.fade;
+  const {gy,gh,party,pond,log}=G;
 
   // party past the cedars
   ctx.globalCompositeOperation='lighter';
@@ -822,46 +795,47 @@ function above(now,tS,dt){
   ctx.save();ctx.translate(party.x+8,party.y+12);ctx.scale(1,0.28);glow(0,0,62,pc,0.16*I);ctx.restore();
   if(lvl>0.5){const a=Math.sin(tS*0.6)*0.5-1.15,al=0.16*(lvl-0.5)*2*(leaning?1.4:1);for(let i=8;i<140;i+=1){const x=party.x+Math.cos(a)*i,y=party.y-6+Math.sin(a)*i;if(y<2)break;R(x,y,1,1,pc2,al*(1-i/140));}}
   ctx.globalCompositeOperation='source-over';
-  if(lvl>0.22&&party.fade>0.2){for(let i=0;i<5;i++){const ph=i%2?BEAT/2:0,b=reduce?0:Math.round(kickEnv(bt-ph)*1.4),x=party.x-9+i*4+(i>2?1:0),y=party.y+1-b;R(x,y-3,1,3,[4,4,8]);R(x,y-4,1,1,[4,4,8]);if(i===2&&e>0.6)R(x+1,y-4,1,1,[4,4,8]);}}
+  if(lvl>0.22){for(let i=0;i<5;i++){const ph=i%2?BEAT/2:0,b=reduce?0:Math.round(kickEnv(bt-ph)*1.4),x=party.x-9+i*4+(i>2?1:0),y=party.y+1-b;R(x,y-3,1,3,[4,4,8]);R(x,y-4,1,1,[4,4,8]);if(i===2&&e>0.6)R(x+1,y-4,1,1,[4,4,8]);}}
 
   // fog
   const fogC=mix([80,100,130],[170,200,186],L);
   for(let k=0;k<3;k++){const span=W+160,x=((tS*(1.2+k*0.5)+k*97)%span)-80,y=gy+gh*(0.12+k*0.3);ctx.save();ctx.translate(x,y);ctx.scale(1,0.22);glow(0,0,70,fogC,0.07);ctx.restore();}
 
-  // the clearing, drawn back to front so nearer things cover farther ones
-  drawPond(L,sk.rain);
+  // mushrooms
   const tMin=Date.now()/60000,lf=0.62+0.38*L,list=[];
-  for(const s of SPOTS){const P=s.period,x=(tMin+s.off)/P,k=Math.floor(x),st=cycleState(x-k);if(!st)continue;const pos=spotPos(s);list.push({key:s.key,sp:s.sp,x:pos.x,y:pos.y,k:pos.k,g:st.g,d:st.d,stage:st.stage,v:0.85+0.3*hash(s.id*131+k),side:s.side||1});}
+  for(const s of SPOTS){const P=s.period,x=(tMin+s.off)/P,k=Math.floor(x),st=cycleState(x-k);if(!st)continue;const pos=spotPos(s);list.push({key:s.key,sp:s.sp,x:pos.x,y:pos.y,g:st.g,d:st.d,stage:st.stage,v:0.85+0.3*hash(s.id*131+k),side:s.side||1});}
   const nowMs=Date.now(),hidden=[];
   for(const c of state.colonies){const st=colonyState(c,nowMs);if(!st||st==='gone')continue;const pos=spotPos(c);
     if(st.hidden){hidden.push({c,x:pos.x,y:pos.y,q:st.q});continue;}
     if(c.sp==='lantern'&&L>0.35)continue; // only shows itself after dark
     const base={sp:c.sp,g:st.g,d:st.d,stage:st.stage,side:c.side||1};
-    list.push(Object.assign({key:'c'+c.id+'_'+st.k,x:pos.x,y:pos.y,k:pos.k,v:0.9+0.25*hash(c.id+st.k)},base));
-    if(c.a==='g'&&hash(c.id*3.3+st.k)>0.4)list.push(Object.assign({key:'c'+c.id+'_'+st.k+'b',x:pos.x+(hash(c.id)>0.5?4:-4),y:pos.y+1,k:pos.k+1,v:0.7},base,{g:st.g*0.85}));}
+    list.push(Object.assign({key:'c'+c.id+'_'+st.k,x:pos.x,y:pos.y,v:0.9+0.25*hash(c.id+st.k)},base));
+    if(c.a==='g'&&hash(c.id*3.3+st.k)>0.4)list.push(Object.assign({key:'c'+c.id+'_'+st.k+'b',x:pos.x+(hash(c.id)>0.5?4:-4),y:pos.y+1,v:0.7},base,{g:st.g*0.85}));}
   lastHidden=hidden;
-  const drawCrit=(c,pos)=>{
+  list.sort((a,b)=>a.y-b.y);
+  for(const m of list){if(m.speck)continue;drawShroom(m.sp,m.x,m.y,m.g,m.d,m.v,m.side,lf,L);m.top=m.y-capTop(m.sp,m.g,m.v);
+    if(m.stage==='mature'&&Math.random()<dt*0.22)emitSpores(m.x,m.top,1,m.sp==='mycena'?[140,248,208]:null);}
+  lastList=list;
+
+  // shadow folk
+  for(const c of CRIT){const pos=critPos(c);if(tS<c.hide)continue;
     if(tS>c.blink+0.16){c.blink=tS+2+Math.random()*5;}
-    const eyesOn=!(tS>c.blink&&tS<c.blink+0.16),bob=c.party&&!reduce?-Math.round(e*lvl*1.6):0;
-    const spr=SPR[c.spr],rows=spr.rows,h=rows.length,w=rows[0].length,x0=pos.x-Math.floor(w/2),y0=pos.y-h+bob,body=[15,19,25];
+    const eyesOn=!(tS>c.blink&&tS<c.blink+0.16);
+    const bob=c.party&&!reduce?-Math.round(e*lvl*1.6):0;
+    const spr=SPR[c.spr],rows=spr.rows,h=rows.length,w=rows[0].length,x0=pos.x-Math.floor(w/2),y0=pos.y-h+bob;
+    if(c.log){ctx.save();ctx.beginPath();ctx.rect(0,0,W,log.y-log.h);ctx.clip();}
+    const body=[15,19,25];
     for(let j=0;j<h;j++)for(let i=0;i<w;i++)if(rows[j][i]==='X')R(x0+i,y0+j,1,1,body);
     if(c.party){const dir=Math.sign(party.x-pos.x);ctx.globalCompositeOperation='lighter';for(let j=0;j<h;j++){const row=rows[j];const i=dir>0?row.lastIndexOf('X'):row.indexOf('X');if(i>=0)R(x0+i,y0+j,1,1,pc,0.45*I);}ctx.globalCompositeOperation='source-over';}
-    if(eyesOn){for(const [ex,ey] of spr.eyes)R(x0+ex,y0+ey,1,1,c.eye);c._eyes=[x0,y0];}else c._eyes=null;
-    c._pos={x:pos.x,y:y0+h/2};};
-  const drawFrog=(f)=>{const fx=f.x,fy=f.y;R(fx-2,fy-2,5,2,[60,104,52]);R(fx-2,fy,2,1,[60,104,52]);R(fx+1,fy,2,1,[60,104,52]);R(fx-1,fy-3,1,1,[200,218,108]);R(fx+1,fy-3,1,1,[200,218,108]);
-    if(tS<frogCroak){const sz=(Math.sin(tS*30)>0)?2:1;R(fx+2,fy-1,sz,sz,[190,210,140]);}};
-  const scene=[];
-  for(const t of TRUNK3)if(!t.fixed)scene.push({k:groundY(projDu(t.x,t.z)),f:()=>drawTrunk(t)});
-  scene.push({k:(V.log.ay+V.log.by)/2,f:drawLog});
-  scene.push({k:V.stump.y,f:drawStump});
-  for(const m of list){if(m.x<-12||m.x>W+12||m.y>H+12)continue;
-    scene.push({k:m.k,f:()=>{drawShroom(m.sp,m.x,m.y,m.g,m.d,m.v,m.side,lf,L);m.top=m.y-capTop(m.sp,m.g,m.v);
-      if(m.stage==='mature'&&Math.random()<dt*0.22)emitSpores(m.x,m.top,1,m.sp==='mycena'?[140,248,208]:null);}});}
-  for(const c of CRIT){if(tS<c.hide){c._eyes=null;continue;}const pos=critPos(c);scene.push({k:pos.k,f:()=>drawCrit(c,pos)});}
-  const fr=frogPos();scene.push({k:fr.y,f:()=>drawFrog(fr)});
-  ctx.globalCompositeOperation='source-over';
-  scene.sort((a,b)=>a.k-b.k);for(const it of scene)it.f();
-  lastList=list;
+    if(eyesOn){for(const [ex,ey] of spr.eyes)R(x0+ex,y0+ey,1,1,c.eye);c._eyes=[x0,y0];}
+    else c._eyes=null;
+    if(c.log)ctx.restore();
+    c._pos={x:pos.x,y:y0+h/2};}
+
+  // frog at the pond
+  const fx=pond.cx-pond.rx-1,fy=pond.cy-1,croaking=tS<frogCroak;
+  R(fx-2,fy-2,5,2,[60,104,52]);R(fx-2,fy,2,1,[60,104,52]);R(fx+1,fy,2,1,[60,104,52]);R(fx-1,fy-3,1,1,[200,218,108]);R(fx+1,fy-3,1,1,[200,218,108]);
+  if(croaking){const sz=(Math.sin(tS*30)>0)?2:1;R(fx+2,fy-1,sz,sz,[190,210,140]);}
 
   // owl in the canopy
   if(L<0.5){const ox=Math.round(W*0.84),oy=Math.round(H*0.15),look=Math.sin(tS*0.2)>0.7?1:0;if(!(tS>owlBlink&&tS<owlBlink+0.18)){R(ox+look,oy,2,1,[255,190,80]);R(ox+4+look,oy,2,1,[255,190,80]);}if(tS>owlBlink+0.18)owlBlink=tS+3+Math.random()*6;}
@@ -930,7 +904,14 @@ const belowBg=document.createElement('canvas'),netLayer=document.createElement('
 let belowMask=new Uint8Array(1),netCache=new Map(),netKey='',NETS=[],belowFlash=null,prevKick=0;
 const sparks=[],dust=[],drips=[],GS={x:0,y:0},CEDAR_ROOTS=[],TRUNK3=[];
 const TRUNKS=[0.31,0.55,0.76];
-const zOf=s=>wpos(s).z;
+let rotY=0,rotShown=0; // how far the block is turned (radians): the target, and the eased value drawn
+const DEPTH=()=>W*0.7;
+// a point in the soil block, seen from the current angle
+function projX(x,z){return W/2+(x-W/2)*Math.cos(rotShown)+z*Math.sin(rotShown);}
+function projD(x,z){return clamp((-(x-W/2)*Math.sin(rotShown)+z*Math.cos(rotShown))/DEPTH()+0.5,0,1);} // 0 back, 1 front
+// how near the front of the clearing a mushroom stands: 0 = back, 1 = front
+function netDepth(s){const p=spotPos(s);return clamp((p.y-G.gy)/G.gh,0,1);}
+const zOf=s=>(netDepth(s)-0.5)*DEPTH();
 function bakeBelow(){
   belowBg.width=W;belowBg.height=H;netLayer.width=W;netLayer.height=H;belowMask=new Uint8Array(W*H);netCache=new Map();netKey='';
   const surf=G.surf,b=belowBg.getContext('2d'),img=b.createImageData(W,H),d=img.data;
@@ -950,11 +931,11 @@ function bakeBelow(){
   GS.x=Math.round(W*0.14);GS.y=Math.round(surf+(H-surf)*0.5);for(let i=0;i<6;i++)P(GS.x-3+i,GS.y+Math.round(i*0.5),i===0||i===5?[90,90,96]:[150,255,170],4);
   b.putImageData(img,0,0);
   // cedar roots, in three dimensions so they turn with the block
-  CEDAR_ROOTS.length=0;TRUNK3.length=0;const D=DEPTH();let rootFixed=false;
+  CEDAR_ROOTS.length=0;TRUNK3.length=0;const D=DEPTH();
   const root=(x,y,z,a,h,len,w0,dep,rr)=>{for(let i=0;i<len;i++){a+=(rr()-0.5)*0.32;a+=(Math.PI/2-a)*0.02;h+=(rr()-0.5)*0.2;const c=Math.cos(a);x+=c*Math.cos(h)*1.2;z+=c*Math.sin(h)*1.2;y+=Math.sin(a)*0.9;if(y>H-8)return;
-    CEDAR_ROOTS.push({x,y:Math.round(y),z,w:Math.max(1,Math.round(w0*(1-i/len))),fixed:rootFixed});
+    CEDAR_ROOTS.push({x,y:Math.round(y),z,w:Math.max(1,Math.round(w0*(1-i/len)))});
     if(rr()<0.04&&dep<3&&len-i>8)root(x,y,z,a+(rr()<0.5?-1:1)*(0.5+rr()*0.7),h+(rr()-0.5)*1.6,(len-i)*0.6,Math.max(1,w0-1),dep+1,rr);}};
-  [...TRUNKS.map(f=>[Math.round(f*W)+4,-0.42*D,8]),[7,0.38*D,13],[W-7,0.38*D,13]].forEach(([tx,tz,tw],ti)=>{TRUNK3.push({x:tx,z:tz,w:tw,fixed:ti>=3});rootFixed=ti>=3;
+  [...TRUNKS.map(f=>[Math.round(f*W)+4,-0.42*D,8]),[7,0.38*D,13],[W-7,0.38*D,13]].forEach(([tx,tz,tw],ti)=>{TRUNK3.push({x:tx,z:tz,w:tw});
     const rr=mulberry(500+ti*31);for(let r=0;r<3;r++)root(tx,surf+2,tz,0.35+rr()*0.9,rr()*Math.PI*2,80+rr()*100,ti<3?3:4,0,rr);});
 }
 function genNet(seed,x0,y0,z0,budget,trail){
@@ -974,9 +955,9 @@ function genNet(seed,x0,y0,z0,budget,trail){
 }
 function buildNets(){
   const now=Date.now(),tMin=now/60000,nets=[];
-  for(const s of SPOTS){const ph=((tMin+s.off)/s.period)%1;nets.push({id:'s'+s.id,kind:'spot',sp:s.sp,x:wpos(s).x,z0:zOf(s),grow:1,fade:1,fruiting:!!cycleState(ph),budget:WOOD[s.sp]?140:300,seed:s.id*101+3});}
+  for(const s of SPOTS){const ph=((tMin+s.off)/s.period)%1;nets.push({id:'s'+s.id,kind:'spot',sp:s.sp,x:spotPos(s).x,z0:zOf(s),grow:1,fade:1,fruiting:!!cycleState(ph),budget:WOOD[s.sp]?140:300,seed:s.id*101+3});}
   for(const c of state.colonies){const st=colonyState(c,now);if(st==='gone')continue;const age=now-c.born;if(age<0)continue;const inc=INCUB[c.sp]*HOUR;
-    nets.push({id:'c'+c.id,kind:'col',sp:c.sp,x:wpos(c).x,z0:zOf(c),col:c,grow:age<inc?0.16+0.84*(age/inc):1,mine:c.src==='you',fade:clamp((c.born+colonyLife(c)-now)/(12*HOUR),0.25,1),budget:WOOD[c.sp]?200:460,seed:(c.id%99991)+17});}
+    nets.push({id:'c'+c.id,kind:'col',sp:c.sp,x:spotPos(c).x,z0:zOf(c),col:c,grow:age<inc?0.16+0.84*(age/inc):1,mine:c.src==='you',fade:clamp((c.born+colonyLife(c)-now)/(12*HOUR),0.25,1),budget:WOOD[c.sp]?200:460,seed:(c.id%99991)+17});}
   for(const n of nets){let pts=netCache.get(n.id);if(!pts){pts=genNet(n.seed,n.x,G.surf+2,n.z0,n.budget,n.sp==='lantern');netCache.set(n.id,pts);}n.pts=pts;n.drawn=Math.min(pts.length,Math.max(1,Math.floor(pts.length*n.grow)));
     n.sx0=projX(n.x,n.z0);n.zd=projD(n.x,n.z0);}
   return nets;
@@ -988,7 +969,7 @@ let focusId=null,focusUntil=0;
 function paintNets(){withCtx(netLayer.getContext('2d'),()=>{ctx.clearRect(0,0,W,H);
   const cs=Math.cos(rotShown),sn=Math.sin(rotShown),cx=W/2,D=DEPTH(),SOIL=[58,42,32];
   // roots first, far to near
-  for(const r of CEDAR_ROOTS){if(r.fixed){r.sx=r.x;r.d=0.85;}else{r.sx=cx+(r.x-cx)*cs+r.z*sn;r.d=clamp((-(r.x-cx)*sn+r.z*cs)/D+0.5,0,1);}}
+  for(const r of CEDAR_ROOTS){r.sx=cx+(r.x-cx)*cs+r.z*sn;r.d=clamp((-(r.x-cx)*sn+r.z*cs)/D+0.5,0,1);}
   const rs=CEDAR_ROOTS.slice().sort((a,b)=>a.d-b.d);
   for(const r of rs){ctx.fillStyle=rgb(mix([36,26,21],[64,47,37],r.d));ctx.fillRect(Math.round(r.sx-r.w/2),r.y,r.w,1);}
   // then every network, far to near
@@ -1000,15 +981,16 @@ function paintNets(){withCtx(netLayer.getContext('2d'),()=>{ctx.clearRect(0,0,W,
     for(let i=0;i<n.pts.length;i++){const p=n.pts[i];p.sx=cx+(p.x-cx)*cs+p.z*sn;if(i<n.drawn)R(p.sx,p.y,1,1,col,a0*(1-0.5*i/len));}
     R(n.sx0-1,G.surf+2,3,2,col,Math.min(1,a0+0.15));}});}
 function wormAt(t){return{x:W*(0.5+0.4*Math.sin(t/37+1)),y:G.surf+(H-G.surf)*(0.42+0.12*Math.sin(t/53))+5*Math.sin(t/11)};}
-function pondCut(){const pd=G.pond;return{x:projX(pd.cx,zFromY(pd.cy)),rx:pd.rx};}
+function pondCut(){const pd=G.pond,pz=(clamp((pd.cy-G.gy)/G.gh,0,1)-0.5)*DEPTH();return{x:projX(pd.cx,pz),rx:Math.round(pd.rx*(0.5+0.5*Math.abs(Math.cos(rotShown)))+8*Math.abs(Math.sin(rotShown)))};}
 function below(tS,dt){
   const L=lightLevel(),sk=sky(),surf=G.surf,bt=beatTime(),e=reduce?0.3:kickEnv(bt),lvl=beatLevel(L);
+  rotShown+=(rotY-rotShown)*(reduce?1:Math.min(1,dt*12));if(Math.abs(rotY-rotShown)<0.002)rotShown=rotY;
   ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
   ctx.drawImage(belowBg,0,0);
   // the clearing, seen edge-on above the cut, turning with the block
   const airT=mix(mix([8,12,30],[70,104,100],L),[40,44,54],sk.rain*0.5),airB=mix(mix([18,24,40],[96,130,104],L),[48,52,60],sk.rain*0.5);
   for(let y=0;y<surf;y++)R(0,y,W,1,mix(airT,airB,y/surf));
-  for(const t of TRUNK3.slice().sort((a,b)=>(a.fixed?1:projD(a.x,a.z))-(b.fixed?1:projD(b.x,b.z)))){const d=t.fixed?1:projD(t.x,t.z);R((t.fixed?t.x:projX(t.x,t.z))-t.w/2,0,t.w,surf,mix([16,18,28],[6,8,11],d));}
+  for(const t of TRUNK3.slice().sort((a,b)=>projD(a.x,a.z)-projD(b.x,b.z))){const d=projD(t.x,t.z);R(projX(t.x,t.z)-t.w/2,0,t.w,surf,mix([16,18,28],[6,8,11],d));}
   const pc=pondCut();for(let y=0;y<14;y++){const w=Math.round(pc.rx*Math.sqrt(Math.max(0,1-(y/14)**2)));R(pc.x-w-1,surf+y,2*w+3,1,[30,26,24]);R(pc.x-w,surf+y,2*w+1,1,mix([16,32,60],[8,14,30],y/14));}
   const lg=G.log,st=G.stump,lz=zOf({a:'log',f:0.5}),sz=zOf({a:'stump',side:1});
   const la=projX(lg.x0,lz),lb=projX(lg.x1,lz),l0=Math.min(la,lb),l1=Math.max(la,lb);
@@ -1017,7 +999,7 @@ function below(tS,dt){
   const lf=0.62+0.38*L,now=Date.now(),tMin=now/60000,shown=[];
   for(const s of SPOTS){const x=(tMin+s.off)/s.period,k=Math.floor(x),c=cycleState(x-k);if(c)shown.push([s,c,0.85+0.3*hash(s.id*131+k)]);}
   for(const c of state.colonies){const s2=colonyState(c,now);if(s2&&s2!=='gone'&&!s2.hidden&&!(c.sp==='lantern'&&L>0.35))shown.push([c,s2,0.95]);}
-  for(const it of shown){const w=wpos(it[0]);it.x=projX(w.x,w.z);it.d=projD(w.x,w.z);}
+  for(const it of shown){const s=it[0];it.x=projX(spotPos(s).x,zOf(s));it.d=projD(spotPos(s).x,zOf(s));}
   shown.sort((a,b)=>a.d-b.d);
   for(const it of shown){const [s,c,v]=it,x=it.x,y=s.a==='log'?surf-2:s.a==='stump'?surf-3:surf;drawShroom(s.sp,x,y,c.g,c.d,v,s.side||1,lf*(0.75+0.25*it.d),L);
     if(s.sp==='lantern'){ctx.globalCompositeOperation='lighter';glow(x,y-6,10*c.g,[255,96,190],(0.22+0.5*e*Math.max(lvl,0.3))*(1-c.d));ctx.globalCompositeOperation='source-over';}}
@@ -1079,7 +1061,8 @@ function tapBelow(x,y){
 }
 const vBtn=document.getElementById('vbtn');
 function setView(v){
-  if(v===view)return;view=v;vBtn.textContent=v?'Back up':'Go below';vBtn.setAttribute('aria-pressed',v?'true':'false');
+  if(v===view)return;view=v;
+  rotY=0; // the soil swings back to face-on as you move between views, so the cut lines up with the clearingvBtn.textContent=v?'Back up':'Go below';vBtn.setAttribute('aria-pressed',v?'true':'false');
   if(v){const first=!state.journal.web;note('web',true);
     if(first)say('Below the moss. Every mushroom up there is just the fruit of this. Drag sideways to turn it.',9000);
     else if(!state.turnTip)say('Drag sideways to turn the soil and see what\'s behind.',7000);}
@@ -1099,16 +1082,13 @@ setInterval(()=>{
   const L=lightLevel(),tS=performance.now()/1000;
   if(L<0.5&&sky().rain<0.2&&Math.random()<0.35)crickets();
   if(L<0.5&&Math.random()<0.012)owl();
-  if(Math.random()<0.02){frogCroak=tS+0.5;const f=frogPos();croakSound((f.x/W)*2-1);ripples.push({x:f.x+4,y:f.y+1,r:1,life:1});}
+  if(Math.random()<0.02){frogCroak=tS+0.5;croakSound((G.pond.cx/W)*2-1);ripples.push({x:G.pond.cx-G.pond.rx+3,y:G.pond.cy,r:1,life:1});}
   if(tS>flavorAt){say(FLAVOR[Math.floor(Math.random()*FLAVOR.length)]);flavorAt=tS+80+Math.random()*90;}
 },1000);
 
 /* ---------- touch ---------- */
-function inPond(x,y){const p=V.pond;return((x-p.cx)**2)/((p.rx+1)**2)+((y-p.cy)**2)/((p.ry+1)**2)<=1;}
-function onLog(x,y){const l=V.log;return segDist(x,y,l.ax,l.ay-l.h/2,l.bx,l.by-l.h/2)<=l.h/2+2;}
-// the same tests on the unturned layout (for placing things in the world)
-function inPond0(x,y){const p=G.pond;return((x-p.cx)**2)/((p.rx+1)**2)+((y-p.cy)**2)/((p.ry+1)**2)<=1;}
-function onLog0(x,y){const l=G.log;return x>=l.x0-2&&x<=l.x1+3&&y>=l.y-l.h-2&&y<=l.y+1;}
+function inPond(x,y){const p=G.pond;return((x-p.cx)**2)/((p.rx+1)**2)+((y-p.cy)**2)/((p.ry+1)**2)<=1;}
+function onLog(x,y){const l=G.log;return x>=l.x0-2&&x<=l.x1+3&&y>=l.y-l.h-2&&y<=l.y+1;}
 function addPulse(x,y){
   const targets=lastList.filter(m=>!m.speck).map(m=>({m,dd:Math.hypot(m.x-x,m.y-y)})).filter(o=>o.dd<95&&o.dd>3).sort((a,b)=>a.dd-b.dd).slice(0,3);
   const t0=performance.now()/1000;
@@ -1119,11 +1099,11 @@ function addPulse(x,y){
 }
 let down=null;
 cv.addEventListener('pointerdown',ev=>{down={x:ev.clientX,y:ev.clientY,rot:rotY,mode:null};try{cv.setPointerCapture(ev.pointerId);}catch(e){}});
-// dragging sideways walks you around the clearing (and turns the soil below with it)
+// below the moss, dragging sideways turns the block of soil
 cv.addEventListener('pointermove',ev=>{
-  if(!down||viewP!==view)return;const dx=ev.clientX-down.x,dy=ev.clientY-down.y;
+  if(!down||view!==1||viewP!==1)return;const dx=ev.clientX-down.x,dy=ev.clientY-down.y;
   if(!down.mode){if(Math.abs(dx)>10&&Math.abs(dx)>Math.abs(dy)*1.2)down.mode='turn';else if(Math.abs(dy)>10)down.mode='swipe';}
-  if(down.mode==='turn')rotY=clamp(down.rot+dx/cv.getBoundingClientRect().width*2.4,-ROT_MAX,ROT_MAX);
+  if(down.mode==='turn')rotY=clamp(down.rot+dx/cv.getBoundingClientRect().width*2.4,-1.15,1.15);
 });
 cv.addEventListener('pointercancel',()=>{down=null;});
 cv.addEventListener('pointerup',ev=>{
@@ -1145,9 +1125,9 @@ function tapAbove(x,y){
   // the owl
   if(lightLevel()<0.5&&Math.hypot(x-(Math.round(W*0.84)+3),y-Math.round(H*0.15))<8){owlBlink=tS;owl();say('The owl blinks at you, slowly.');note('owl');return;}
   // the frog
-  const fr=frogPos();if(Math.hypot(x-fr.x,y-(fr.y-1))<6){frogCroak=tS+0.5;croakSound(pan);ripples.push({x:fr.x+4,y:fr.y+1,r:1,life:1});say('The frog croaks, off the beat.');note('frog');return;}
+  if(Math.hypot(x-(G.pond.cx-G.pond.rx-1),y-(G.pond.cy-2))<6){frogCroak=tS+0.5;croakSound(pan);ripples.push({x:G.pond.cx-G.pond.rx+3,y:G.pond.cy,r:1,life:1});say('The frog croaks, off the beat.');note('frog');return;}
   // the party
-  const p=V.party;if(p.fade>0.2&&Math.abs(x-p.x)<24&&y<p.y+10&&y>p.y-60){leanUntil=Date.now()+10000;say('You lean toward the music. It leans back.');note('dancers');return;}
+  const p=G.party;if(Math.abs(x-p.x)<24&&y<p.y+10&&y>p.y-60){leanUntil=Date.now()+10000;say('You lean toward the music. It leans back.');note('dancers');return;}
   // mushrooms
   let best=null,bd=state.held?5:10;for(const m of lastList){if(m.speck)continue;const cy=((m.top||m.y)+m.y)/2,dd=Math.hypot(m.x-x,cy-y);if(dd<bd){bd=dd;best=m;}}
   if(best){const nm=NAMES[best.sp];flashes[best.key]=tS;emitSpores(best.x,best.top||best.y,best.stage==='mature'?16:5,PRINT[best.sp].glow||null);chime(PENTA[NOTE[best.sp]],pan,0.1);puff(pan);
@@ -1157,16 +1137,16 @@ function tapAbove(x,y){
   if(inPond(x,y)){ripples.push({x,y,r:1,life:1});plop(pan);
     if(state.held){say(`The ${NAMES[state.held]} spores float off across the water.`);state.held=null;save();updateHeld();}else say('Rings cross the pond.');return;}
   // log & stump
-  const onStump=Math.abs(x-V.stump.x)<9&&y>V.stump.y-V.stump.h-3&&y<V.stump.y+2;
+  const onStump=Math.abs(x-G.stump.x)<9&&y>G.stump.y-G.stump.h-3&&y<G.stump.y+2;
   if(state.held&&(onLog(x,y)||onStump)){const sp=state.held;
-    if(WOOD[sp])scatter(sp,onStump?{a:'stump',side:x<V.stump.x?-1:1}:{a:'log',f:clamp(logParam(x,y),0.08,0.92)},x,y);
+    if(WOOD[sp])scatter(sp,onStump?{a:'stump',side:x<G.stump.x?-1:1}:{a:'log',f:clamp((x-G.log.x0)/(G.log.x1-G.log.x0),0.08,0.92)},x,y);
     else say(`${capFirst(NAMES[sp])} spores won't take on bare wood. Try the moss.`);return;}
   // moss
   if(y>G.gy+5&&!onLog(x,y)){
     if(state.held){const sp=state.held;
       if(WOOD[sp]){say(`${capFirst(NAMES[sp])} spores want wood, not moss. Try the log${sp==='turkey'?' or the stump':''}.`);return;}
-      const treeline=y<G.gy+G.gh*0.16&&V.party.fade>0.3&&Math.abs(x-V.party.x)<W*0.22;
-      scatter(treeline?'lantern':sp,screenToGround(x,y),x,y,treeline&&sp!=='lantern');return;}
+      const treeline=y<G.gy+G.gh*0.16&&x<W*0.38;
+      scatter(treeline?'lantern':sp,{a:'g',nx:x/W,ny:(y-G.gy)/G.gh},x,y,treeline&&sp!=='lantern');return;}
     const hit=addPulse(x,y),under=lastHidden.find(o=>Math.hypot(o.x-x,o.y-y)<12);
     chime(PENTA[Math.floor(Math.random()*3)],pan,0.05);
     say(under?'Something is spreading under the moss here.':hit?'The network hums under the moss.':'The moss is quiet here.');return;}
@@ -1199,12 +1179,12 @@ function groundHints(tS){
   const boost=tS<showGround,c=PRINT[sp].glow||[200,255,220],rate=boost?5:1;
   if(Math.random()<dt*rate&&hintGlints.length<(boost?14:5)){
     let x,y;
-    if(WOOD[sp]){const l=V.log,st=V.stump;if(Math.random()<0.3){x=st.x-5+Math.random()*10;y=st.y-st.h-1;}else{const t=0.05+Math.random()*0.9;x=l.ax+(l.bx-l.ax)*t;y=l.ay+(l.by-l.ay)*t-l.h+1+Math.random()*(l.h-2);}}
+    if(WOOD[sp]){const lg=G.log,st=G.stump,onSt=Math.random()<0.3;x=onSt?st.x-5+Math.random()*10:lg.x0+2+Math.random()*(lg.x1-lg.x0-4);y=onSt?st.y-st.h-1:lg.y-lg.h+1+Math.random()*(lg.h-2);}
     else{x=16+Math.random()*(W-32);y=G.gy+6+Math.random()*(G.gh-10);if(inPond(x,y)||onLog(x,y))x=null;}
     if(x!==null)hintGlints.push({x,y,age:0,life:1.6+Math.random()*1});
   }
   ctx.globalCompositeOperation='lighter';
-  if(WOOD[sp]&&boost){const l=V.log,st=V.stump,a=0.1+0.05*Math.sin(tS*1.5),n=Math.round(Math.abs(l.bx-l.ax)+Math.abs(l.by-l.ay));for(let i=0;i<=n;i++){const t=i/(n||1);R(l.ax+(l.bx-l.ax)*t,l.ay+(l.by-l.ay)*t-l.h-1,1,1,c,a);}R(st.x-6,st.y-st.h-2,12,1,c,a);}
+  if(WOOD[sp]&&boost){const lg=G.log,st=G.stump,a=0.1+0.05*Math.sin(tS*1.5);R(lg.x0,lg.y-lg.h-1,lg.x1-lg.x0,1,c,a);R(st.x-6,st.y-st.h-2,12,1,c,a);}
   for(let i=hintGlints.length-1;i>=0;i--){const g=hintGlints[i];g.age+=dt;if(g.age>=g.life){hintGlints.splice(i,1);continue;}
     const a=Math.sin(Math.PI*g.age/g.life)*(boost?0.28:0.16);glow(g.x,g.y,2.5,c,a);R(g.x,g.y,1,1,c,a*1.4);}
   ctx.globalCompositeOperation='source-over';
@@ -1309,7 +1289,6 @@ function enter(withSound){
   if(withSound)setSound(true);
   try{navigator.wakeLock&&navigator.wakeLock.request('screen').catch(()=>{});}catch(e){}
   setTimeout(()=>{say(prevVisit&&Date.now()-prevVisit>2*60000?awayLine(prevVisit):'Tap the moss, the mushrooms, the shadows. Or just sit.',8000);},900);
-  if(!state.turnTip)setTimeout(()=>{if(!state.turnTip)say('Drag sideways to walk around the clearing.',7000);},11000);
   save();
 }
 document.getElementById('enterSound').addEventListener('click',()=>enter(true));
