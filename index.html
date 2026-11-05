@@ -666,9 +666,19 @@ function initAudio(){
   const wl=actx.sampleRate*4,wb=actx.createBuffer(1,wl,actx.sampleRate),wd=wb.getChannelData(0);let lastB=0;for(let i=0;i<wl;i++){lastB=(lastB+0.02*(Math.random()*2-1))/1.02;wd[i]=lastB*3.5;}
   const ws=actx.createBufferSource();ws.buffer=wb;ws.loop=true;const wf=actx.createBiquadFilter();wf.type='lowpass';wf.frequency.value=520;const wg=actx.createGain();wg.gain.value=0.12;windGain=wg;
   const lfo=actx.createOscillator();lfo.frequency.value=0.06;const lg=actx.createGain();lg.gain.value=0.06;lfo.connect(lg);lg.connect(wg.gain);ws.connect(wf);wf.connect(wg);wg.connect(master);ws.start();lfo.start();
-  // rain on leaves
-  const rs=actx.createBufferSource();rs.buffer=noiseBuf;rs.loop=true;rs.loopEnd=1.7;const rf=actx.createBiquadFilter();rf.type='bandpass';rf.frequency.value=2200;rf.Q.value=0.35;
-  rainGain=actx.createGain();rainGain.gain.value=0.0001;rs.connect(rf);rf.connect(rainGain);rainGain.connect(master);rs.start();
+  // rain: a warm pink-noise wash (long buffer, so no audible loop) plus a faint patter on top
+  const pl=actx.sampleRate*9,pb=actx.createBuffer(2,pl,actx.sampleRate);
+  for(let ch=0;ch<2;ch++){const d=pb.getChannelData(ch);let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+    for(let i=0;i<pl;i++){const w=Math.random()*2-1;b0=0.99886*b0+w*0.0555179;b1=0.99332*b1+w*0.0750759;b2=0.969*b2+w*0.153852;b3=0.8665*b3+w*0.3104856;b4=0.55*b4+w*0.5329522;b5=-0.7616*b5-w*0.016898;d[i]=(b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11;b6=w*0.115926;}
+    const xf=Math.floor(actx.sampleRate*0.4);for(let i=0;i<xf;i++){const k=i/xf;d[pl-xf+i]=d[pl-xf+i]*(1-k)+d[i]*k;}}
+  rainGain=actx.createGain();rainGain.gain.value=0.0001;rainGain.connect(master);
+  const wash=actx.createBufferSource();wash.buffer=pb;wash.loop=true;
+  const wlp=actx.createBiquadFilter();wlp.type='lowpass';wlp.frequency.value=950;wlp.Q.value=0.4;
+  const whp=actx.createBiquadFilter();whp.type='highpass';whp.frequency.value=90;
+  wash.connect(wlp);wlp.connect(whp);whp.connect(rainGain);wash.start();
+  const pat=actx.createBufferSource();pat.buffer=pb;pat.loop=true;pat.playbackRate.value=0.93;
+  const pf=actx.createBiquadFilter();pf.type='bandpass';pf.frequency.value=2600;pf.Q.value=0.6;
+  const pg=actx.createGain();pg.gain.value=0.16;pat.connect(pf);pf.connect(pg);pg.connect(rainGain);pat.start(0,4.1);
   // grove drone
   const dg=actx.createGain();dg.gain.value=0.018;const trem=actx.createOscillator();trem.frequency.value=0.09;const tg=actx.createGain();tg.gain.value=0.009;trem.connect(tg);tg.connect(dg.gain);trem.start();
   for(const m of [45,52,57]){const o=actx.createOscillator();o.type='sine';o.frequency.value=mtof(m);o.detune.value=(Math.random()-0.5)*8;o.connect(dg);o.start();}
@@ -684,7 +694,10 @@ function schedule(){
   // below the moss: the beat becomes a thump in the soil, the wind and rain go distant
   const under=view===1,lean=!under&&Date.now()<leanUntil;
   beatGain.gain.setTargetAtTime(0.0001+0.6*beatLevel(lightLevel())*(under?1.5:1),actx.currentTime,1.5);
-  rainGain.gain.setTargetAtTime(0.0001+(under?0.05:0.2)*sky().rain,actx.currentTime,1.2);
+  const rn=sky().rain;
+  rainGain.gain.setTargetAtTime(0.0001+(under?0.05:0.15)*rn,actx.currentTime,1.2);
+  // the odd fat drop landing on a leaf, soft and scattered
+  if(!under&&rn>0.15&&Math.random()<rn*0.09)leafDrop(actx.currentTime+Math.random()*0.05);
   windGain.gain.setTargetAtTime(under?0.025:0.12,actx.currentTime,1.2);
   beatFilter.frequency.setTargetAtTime(under?190:lean?2600:420,actx.currentTime,lean?0.5:1.2);
 }
@@ -702,6 +715,12 @@ function hat(t,v){noiseHit(t,'highpass',7000,v,0.05,beatBus);}
 function clap(t){noiseHit(t,'bandpass',1400,0.3,0.14,beatBus);}
 function bass(t,m,dur){const o=actx.createOscillator();o.type='sawtooth';o.frequency.value=mtof(m);const f=actx.createBiquadFilter();f.type='lowpass';f.frequency.value=320;const g=actx.createGain();g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.3,t+0.012);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);o.connect(f);f.connect(g);g.connect(beatBus);o.start(t);o.stop(t+dur+0.05);}
 function pad(t,notes,dur){const g=actx.createGain();g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.05,t+0.8);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);g.connect(beatBus);for(const m of notes){const o=actx.createOscillator();o.type='triangle';o.frequency.value=mtof(m);o.detune.value=(Math.random()-0.5)*14;o.connect(g);o.start(t);o.stop(t+dur+0.1);}}
+function leafDrop(t){
+  const o=actx.createOscillator(),g=actx.createGain(),f=actx.createBiquadFilter(),base=1400+Math.random()*1600;
+  o.type='sine';o.frequency.setValueAtTime(base,t);o.frequency.exponentialRampToValueAtTime(base*0.72,t+0.06);
+  f.type='lowpass';f.frequency.value=3200;env(g,t,0.004,0.006+Math.random()*0.012,0.05+Math.random()*0.06);
+  o.connect(f);f.connect(g);out(g,Math.random()*1.6-0.8,0.9);o.start(t);o.stop(t+0.2);
+}
 function sfxOk(){return actx&&audioOn&&actx.state==='running';}
 function chime(m,p,v){if(!sfxOk())return;const t=actx.currentTime+0.01;const o1=actx.createOscillator(),o2=actx.createOscillator(),g=actx.createGain(),g2=actx.createGain();o1.type='triangle';o2.type='sine';o1.frequency.value=mtof(m);o2.frequency.value=mtof(m)*2.01;g2.gain.value=0.3;env(g,t,0.01,v||0.1,2.4);o1.connect(g);o2.connect(g2);g2.connect(g);out(g,p,0.8);o1.start(t);o2.start(t);o1.stop(t+2.6);o2.stop(t+2.6);}
 function puff(p){if(!sfxOk())return;const g=noiseHit(actx.currentTime+0.01,'bandpass',2600,0.05,0.25,actx.createGain());const pn=panNode(p);if(pn){g.connect(pn);pn.connect(master);}else g.connect(master);}

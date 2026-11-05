@@ -1,5 +1,5 @@
 // Spore Hollow offline cache. Bump VERSION when shipping changes.
-const VERSION = 'spore-hollow-v6';
+const VERSION = 'spore-hollow-v7';
 const CORE = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 
 self.addEventListener('install', e => {
